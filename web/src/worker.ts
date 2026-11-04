@@ -10,7 +10,7 @@ import { decodeFits, FITS_EXT, isFits } from "./engine/fits";
 import { decodeRawData, rawUnsupported, whiteBalanceFrom } from "./engine/rawdata";
 import { MediaVideoSource } from "./video";
 import { ZipWriter } from "./engine/zip";
-import { calibratedSource, masterStats, MasterBuilder, type Calibration, type Master } from "./engine/calibrate";
+import { calibratedSource, decodeMaster, encodeMaster, masterStats, MasterBuilder, type Calibration, type Master } from "./engine/calibrate";
 import { FileSink, MemorySink, type ByteSink, type WritableFile } from "./engine/sink";
 import { encodeFits, encodePng16, encodeTiff16, type ImageMeta } from "./engine/imagewrite";
 import { captureDate, type TimelapseOptions } from "./engine/timelapse";
@@ -48,7 +48,8 @@ export type ToWorker =
   /** Kalibrierbilder laden (leere Liste: entfernen) */
   | { type: "calibration"; kind: CalKind; files: File[]; rawMode?: "raw" | "preview" }
   /** welche Master angewendet werden (Vorschau, Betrachter, Verarbeitung) */
-  | { type: "calibration-use"; dark: boolean; flat: boolean };
+  | { type: "calibration-use"; dark: boolean; flat: boolean; scaleDark?: boolean }
+  | { type: "save-master"; kind: CalKind };
 
 export type CalKind = "dark" | "flat" | "flatDark";
 
@@ -87,12 +88,13 @@ export interface PreviewDetection {
   threshold: number;
   disc?: { cx: number; cy: number; r: number; visibleLimb: number; rms: number; kind: "sun" | "moon" };
   /** Oberflächen-Ausrichtung: Verschiebung gegenüber dem Referenzbild */
-  surface?: { dx: number; dy: number; peak: number };
+  surface?: { dx: number; dy: number; peak: number; angle?: number };
 }
 
 export type FromWorker =
   | { type: "opened"; info: FileInfo }
   | { type: "calibrated"; kind: CalKind; stats: ReturnType<typeof masterStats> | null; error?: string }
+  | { type: "master-file"; kind: CalKind; bytes: Uint8Array }
   | {
       type: "preview";
       index: number;
@@ -151,13 +153,13 @@ const ctx = self as unknown as DedicatedWorkerGlobalScope;
 let source: FrameSource | null = null;
 // Kalibrierung: geladene Master, ob sie gelten, und die damit kalibrierte Quelle (zwischengespeichert)
 const masters: Partial<Record<CalKind, Master>> = {};
-let calUse = { dark: false, flat: false };
+let calUse = { dark: false, flat: false, scaleDark: true };
 let calSource: FrameSource | null = null;
 /** aktuelle Quelle, mit Dark/Flat falls eingeschaltet */
 function activeSource(): FrameSource {
   if (!source) throw new Error(msg("noFile"));
   if (!calSource) {
-    const cal: Calibration = { dark: calUse.dark ? masters.dark : undefined, flat: calUse.flat ? masters.flat : undefined, flatDark: masters.flatDark };
+    const cal: Calibration = { dark: calUse.dark ? masters.dark : undefined, flat: calUse.flat ? masters.flat : undefined, flatDark: masters.flatDark, scaleDark: calUse.scaleDark };
     calSource = calibratedSource(source, cal);
   }
   return calSource;
@@ -191,15 +193,19 @@ async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = 
   return { src, name, dec };
 }
 
-/** Master aus höchstens 256 Bildern */
+/** Master aus höchstens 256 Bildern – oder ein gespeicherter Master (eine FITS-Datei) */
 async function buildMaster(files: File[], rawMode: "raw" | "preview"): Promise<Master> {
+  if (files.length === 1 && FITS_EXT.test(files[0].name)) {
+    const saved = decodeMaster(new Uint8Array(await files[0].arrayBuffer()));
+    if (saved) return saved;
+  }
   const { src } = await openFiles(files, rawMode);
   try {
     const b = new MasterBuilder();
     const n = Math.min(src.frameCount, 256);
     for (let i = 0; i < n; i++) {
       if (cancel) throw new Error(msg("cancelled"));
-      b.add(await src.readFrame(i));
+      b.add(await src.readFrame(i), src.exposure?.(i) ?? undefined);
       post({ type: "progress", phase: "analyse", done: i + 1, total: n });
     }
     return b.finish();
@@ -321,7 +327,7 @@ async function encodePng(f: Frame): Promise<Uint8Array> {
 }
 
 function logCsv(src: FrameSource, frames: FrameResult[], stamps: BigInt64Array | null, hdrGroups: number[][]): string {
-  const rows = ["frame;time_utc;accepted;reason;centre_x;centre_y;disc_radius;visible_limb;quality;limb;exposure_s;hdr_group;sun_x;sun_y"];
+  const rows = ["frame;time_utc;accepted;reason;centre_x;centre_y;disc_radius;visible_limb;quality;limb;exposure_s;hdr_group;sun_x;sun_y;rotation_deg"];
   const groupNo = new Map<number, number>();
   hdrGroups.forEach((g, k) => g.forEach((i) => groupNo.set(i, k + 1)));
   for (const r of frames) {
@@ -342,6 +348,7 @@ function logCsv(src: FrameSource, frames: FrameResult[], stamps: BigInt64Array |
       groupNo.get(r.index) ?? "",
       r.det.disc?.sun ? r.det.disc.sun.cx.toFixed(2) : "",
       r.det.disc?.sun ? r.det.disc.sun.cy.toFixed(2) : "",
+      r.det.surface?.angle !== undefined ? ((r.det.surface.angle * 180) / Math.PI).toFixed(3) : "",
     ].join(";"));
   }
   return rows.join("\r\n") + "\r\n";
@@ -367,8 +374,15 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       cancel = true;
       return;
     }
+    if (m.type === "save-master") {
+      const master = masters[m.kind];
+      if (!master) throw new Error(msg("calEmpty"));
+      const bytes = encodeMaster(master, m.kind, SOFTWARE);
+      post({ type: "master-file", kind: m.kind, bytes }, [bytes.buffer]);
+      return;
+    }
     if (m.type === "calibration-use") {
-      calUse = { dark: m.dark, flat: m.flat };
+      calUse = { dark: m.dark, flat: m.flat, scaleDark: m.scaleDark ?? true };
       calSource = null;
       return;
     }

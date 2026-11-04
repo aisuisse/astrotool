@@ -395,6 +395,42 @@ try {
     return { ...r, masters: texts };
   });
 
+  if (calDir) await test("Kalibrierung: Master als FITS speichern und wieder laden", async () => {
+    const info = () => ev(`document.querySelector('[data-cal="dark"] .calInfo').innerText`);
+    await setFiles(`[data-cal="dark"] input[type=file]`, [join(calDir, "dark.ser")]);
+    await waitFor(`/^Master (from|aus)/.test(document.querySelector('[data-cal="dark"] .calInfo').innerText)`, 60_000, "Master Dark");
+    const built = await info();
+    // Speichern-Dialog durch eine Datei im privaten Speicher der Seite (OPFS) ersetzen
+    await ev(`(() => {
+      window.__origSave2 = window.showSaveFilePicker;
+      window.showSaveFilePicker = async (o) => { window.__suggested2 = o.suggestedName; const d = await navigator.storage.getDirectory(); return d.getFileHandle('master-test.fits', { create: true }); };
+      document.querySelector('[data-cal="dark"] [data-cal-save]').click();
+      return true; })()`);
+    await waitFor(`/master_dark\.fits|master-test\.fits/.test(document.getElementById('result').innerText)`, 30_000, "Master gespeichert");
+    const b64 = await ev(`(async () => {
+      const d = await navigator.storage.getDirectory();
+      const f = await (await d.getFileHandle('master-test.fits')).getFile();
+      const buf = new Uint8Array(await f.arrayBuffer());
+      await d.removeEntry('master-test.fits');
+      window.showSaveFilePicker = window.__origSave2;
+      let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      return btoa(s); })()`);
+    const bytes = Buffer.from(b64, "base64");
+    const head = bytes.subarray(0, 2880).toString("latin1");
+    check(/IMAGETYP= 'Master Dark/.test(head) && /NCOMBINE=\s+6\b/.test(head) && /BITPIX  =\s+-32/.test(head), `FITS-Kopf: ${head.slice(0, 400)}`);
+    const saved = join(outDir, "master_dark.fits");
+    writeFileSync(saved, bytes);
+    // entfernen und aus der Datei wieder laden: gleiche Angaben wie vorher
+    await ev(`document.querySelector('[data-cal="dark"] [data-cal-clear]').click(); true`);
+    await waitFor(`!/Master/.test(document.querySelector('[data-cal="dark"] .calInfo').innerText)`, 10_000, "Master entfernt");
+    await setFiles(`[data-cal="dark"] input[type=file]`, [saved]);
+    await waitFor(`/^Master (from|aus)/.test(document.querySelector('[data-cal="dark"] .calInfo').innerText)`, 60_000, "Master geladen");
+    const loaded = await info();
+    check(loaded === built, `geladen "${loaded}" statt "${built}"`);
+    await ev(`document.querySelector('[data-cal="dark"] [data-cal-clear]').click(); true`);
+    return { built, loaded, bytes: bytes.length, suggested: await ev(`window.__suggested2`) };
+  });
+
   await test("Nur sortieren: alle 600 Frames, volle Grösse, sortiert", async () => {
     await ev(`document.querySelector('[data-preset="quality"]').click(); true`);
     await sleep(800);
@@ -676,6 +712,34 @@ try {
   });
 
   // Ankerbox: mit der Maus in der Eingabe-Ansicht ziehen (wie eine Person), verarbeiten, wieder löschen
+  if (surfaceSer) await test("Oberfläche: Drehung ausgleichen und Referenz nachführen → SER", async () => {
+    await openFiles([resolve(surfaceSer)], "moon_surface");
+    await processMode();
+    await ev(`document.querySelector('[data-preset="surface"]').click(); true`);
+    await sleep(800);
+    const opts = await ev(`({ shown: !document.querySelector('[data-opt="surfaceRotation"]').closest('label').hidden, follow: document.querySelector('[data-opt="surfaceFollow"]').checked })`);
+    check(opts.shown && opts.follow, `Optionen: ${JSON.stringify(opts)}`);
+    await ev(`__t.set('[data-opt="surfaceRotation"]', true); __t.set('#format', 'png'); __t.set('[data-tl="enabled"]', false); true`);
+    const r = await runAndWait(300_000);
+    const zip = r.files.find((f) => /\.zip$/.test(f.name));
+    check(zip && zip.entries >= 50, `ZIP: ${JSON.stringify(zip)}`);
+    // Protokoll: Spalte rotation_deg, Winkel klein (die Testserie ist nur verschoben)
+    const csv = await ev(`(async () => {
+      const a = [...document.querySelectorAll('#result a[download]')].find((x) => /\.zip$/.test(x.download));
+      const b = new Uint8Array(await (await fetch(a.href)).arrayBuffer());
+      const t = new TextDecoder().decode(b);
+      const i = t.lastIndexOf('frame;time_utc');
+      const end = t.indexOf('PK\x01\x02', i); // zentrales Verzeichnis des ZIP
+      return t.slice(i, end > 0 ? end : i + 20000);
+    })()`);
+    const rows = csv.split(/\r?\n/).filter(Boolean);
+    const col = rows[0].split(";").indexOf("rotation_deg");
+    const ang = rows.slice(1).map((l) => l.split(";")[col]).filter((v) => v !== "" && v !== undefined).map(Number).filter((v) => !isNaN(v));
+    check(col > 0 && ang.length >= 50 && Math.max(...ang.map(Math.abs)) < 1, `Winkel: Spalte ${col}, ${ang.length} Werte, max ${Math.max(...ang.map(Math.abs))}`);
+    await ev(`__t.set('[data-opt="surfaceRotation"]', false); __t.set('#format', 'ser'); true`);
+    return { files: r.files, maxAngle: Math.max(...ang.map(Math.abs)) };
+  });
+
   if (surfaceSer) await test("Oberfläche: Ankerbox ziehen → SER, Box löschen", async () => {
     const hint = await ev(`(() => { const r = document.getElementById('anchorRow'); return { hidden: r.hidden, text: document.getElementById('anchorText').textContent, clear: !document.getElementById('anchorClear').hidden }; })()`);
     check(!hint.hidden && /(Ankerbox \(freiwillig\)|Anchor box \(optional\))/.test(hint.text) && !hint.clear, `Hinweis: ${JSON.stringify(hint)}`);
@@ -711,6 +775,43 @@ try {
 
   // ---------- grosse Datei ----------
   if (bigSer) {
+    if (fitsCube) await test("Zuletzt geöffnet: Datei merken, nach Neuladen der App wieder öffnen", async () => {
+      // Datei in den privaten Speicher der Seite kopieren (OPFS) – ihr Handle wirkt wie eines aus dem Öffnen-Dialog
+      await ev(`(() => { const i = document.createElement('input'); i.type = 'file'; i.id = '__tf'; i.hidden = true; document.body.append(i); return true; })()`);
+      await setFiles("#__tf", [resolve(fitsCube)]);
+      await ev(`(async () => {
+        const f = document.getElementById('__tf').files[0];
+        const d = await navigator.storage.getDirectory();
+        const h = await d.getFileHandle('recent-test.fits', { create: true });
+        const w = await h.createWritable(); await w.write(f); await w.close();
+        document.getElementById('__tf').remove();
+        await window.__openHandles([h]);
+        return true; })()`);
+      await waitFor(`document.title.startsWith('recent-test') && !document.getElementById('recentWrap').hidden`, 60_000, "geöffnet und gemerkt");
+      const before = await ev(`document.getElementById('recentMenu').innerText`);
+      check(/recent-test\.fits/.test(before), `Liste: ${before}`);
+      // App neu laden: Liste bleibt, Eintrag öffnet die Datei wieder
+      await cdp("Page.reload", { ignoreCache: false });
+      await sleep(3000);
+      await ev(PAGE_HELPERS);
+      const after = await ev(`({ shown: !document.getElementById('recentWrap').hidden, text: document.getElementById('recentMenu').innerText, title: document.title })`);
+      check(after.shown && /recent-test\.fits/.test(after.text), `nach Neuladen: ${JSON.stringify(after)}`);
+      await ev(`document.getElementById('recentBtn').click(); true`);
+      await sleep(300);
+      await ev(`[...document.querySelectorAll('#recentMenu .recentOpen')].find((b) => /recent-test/.test(b.textContent)).click(); true`);
+      await waitFor(`document.title.startsWith('recent-test') && !document.getElementById('modeTabs').hidden`, 60_000, "aus der Liste geöffnet");
+      const info = await ev(`document.getElementById('info').innerText`);
+      // aufräumen: Eintrag entfernen, Datei löschen
+      await ev(`document.getElementById('recentBtn').click(); true`);
+      await sleep(200);
+      await ev(`(async () => {
+        [...document.querySelectorAll('#recentMenu .recentItem')].filter((r) => /recent-test/.test(r.textContent)).forEach((r) => r.querySelector('.recentForget').click());
+        await new Promise((r) => setTimeout(r, 500));
+        try { await (await navigator.storage.getDirectory()).removeEntry('recent-test.fits'); } catch {}
+        return true; })()`);
+      return { before, after, info: info.slice(0, 200) };
+    });
+
     await test("Grosses SER (Strata-Saturn): öffnen, Betrachter, beste 50 % als SER", async () => {
       await openFiles([resolve(bigSer)], "2022-10-25");
       const details = await ev(`document.getElementById('playDetails').innerText.replace(/\\n/g, ' | ').slice(0, 300)`);

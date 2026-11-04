@@ -68,10 +68,10 @@ Tests: `npm test` · Produktions-Build: `npm run build` (Ausgabe in `web/dist`, 
 | **Betrachter „SER Player“** (eigenständiger Nachbau): Abspielen vorwärts/rückwärts/vor & zurück, Start-/Endmarker, Debayer, Verstärkung, Gamma, Sättigung, Farbbalance, Histogramm, Zoom, Bereich speichern (SER original/wie angezeigt, PNG), Bereich für die Verarbeitung übernehmen | – | ✅ |
 | Reparatur von SER-Dateien mit „0 Frames“ im Kopf | – | ✅ |
 | Nachtmodus (rotes Licht) | – | ✅ |
-| **Dark/Flat-Kalibrierung:** Master aus SER, Video, Bildserie oder RAW (Mittel ohne Höchst- und Tiefstwert), Flat-Dark/Bias, farbneutrale Flats bei Bayer-Daten; vor Zuschnitt und Debayer angewendet, auch in der Vorschau | Dark/Flat | ✅ 0.18 |
+| **Dark/Flat-Kalibrierung:** Master aus SER, Video, Bildserie oder RAW (Mittel ohne Höchst- und Tiefstwert), Flat-Dark/Bias, farbneutrale Flats bei Bayer-Daten; vor Zuschnitt und Debayer angewendet, auch in der Vorschau; Dark an andere Belichtungszeit angepasst, Master als FITS speichern und laden (0.28) | Dark/Flat | ✅ 0.18 |
 | **FITS lesen:** Einzelbilder (grau, Bayer, Farbe; 8/16/32 bit, Gleitkomma) mit Zeit und Belichtung aus dem Kopf – auch als Darks/Flats; Würfel mit vielen Bildern in einer Datei (0.25) öffnen wie ein Video | FITS | ✅ 0.20 |
 | Komprimierte CR3/RAF: Format nicht öffentlich beschrieben – mit dem kostenlosen Adobe DNG Converter in DNG umwandeln (Hinweis in der App) | | Weg über DNG |
-| **Oberflächen-Stabilisierung:** Mond-/Sonnen-Nahaufnahmen ohne ganzen Rand – jedes Bild über die Oberflächenstruktur am ersten Bild ausgerichtet (eigene FFT, Unterpixel), Bilder ohne passende Struktur (Wolken) verworfen; Vorlage „Oberfläche“; freiwillige Ankerbox in der Vorschau ziehen (0.24) | Surface Feature | ✅ 0.22 |
+| **Oberflächen-Stabilisierung:** Mond-/Sonnen-Nahaufnahmen ohne ganzen Rand – jedes Bild über die Oberflächenstruktur am ersten Bild ausgerichtet (eigene FFT, Unterpixel), Bilder ohne passende Struktur (Wolken) verworfen; Vorlage „Oberfläche“; freiwillige Ankerbox in der Vorschau ziehen (0.24); Referenz folgt bei langen Serien der sich wandelnden Struktur, Bilddrehung (Feldrotation) wird erkannt und ausgeglichen (0.28) | Surface Feature | ✅ 0.22 |
 
 ## Reverse Engineering mit rea
 

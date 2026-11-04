@@ -54,6 +54,20 @@ body {
 .brand svg { width: 26px; height: 26px; fill: none; stroke: var(--accent); stroke-width: 1.6; }
 .brand small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.recentWrap { position: relative; }
+.recentMenu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 280px; max-width: min(520px, 90vw);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+}
+.recentMenu .recentItem { display: flex; align-items: center; gap: 4px; }
+.recentMenu .recentOpen {
+  flex: 1; text-align: left; background: none; border: 0; color: var(--text); padding: 6px 8px; border-radius: 6px;
+  cursor: pointer; font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recentMenu .recentOpen:hover, .recentMenu .recentOpen:focus-visible { background: var(--surface-2); }
+.recentMenu small { color: var(--muted); }
+.recentMenu .recentForget { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 8px; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;

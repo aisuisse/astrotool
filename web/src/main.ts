@@ -6,6 +6,7 @@ import { defaultMontage, type MontageOptions } from "./engine/montage";
 import { isLang, t as translate, tr as translateMsg, type I18nKey, type Lang } from "./i18n";
 import { initTools, isDesktopApp } from "./tools";
 import { initPlayer } from "./player";
+import { filesOf, forgetRecent, recentList, recentSupported, rememberRecent, type RecentEntry } from "./recent";
 import type { CalKind, FileInfo, FromWorker, OutputFormat, ToWorker } from "./worker";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -68,9 +69,12 @@ function renderCal() {
     infoEl.classList.toggle("error", !!st.error || mismatch);
     infoEl.textContent = st.loading ? L("cal.loading")
       : st.error ? M(st.error)
-      : st.stats ? L("cal.info", st.stats.frames, st.stats.width, st.stats.height, st.stats.mean.toFixed(1), st.stats.bitDepth) + (mismatch ? " – " + L("cal.mismatch", info!.width, info!.height) : "")
+      : st.stats ? L("cal.info", st.stats.frames, st.stats.width, st.stats.height, st.stats.mean.toFixed(1), st.stats.bitDepth)
+        + (st.stats.exposure ? L("cal.exposure", Number(st.stats.exposure.toPrecision(4))) : "")
+        + (mismatch ? " – " + L("cal.mismatch", info!.width, info!.height) : "")
       : L("cal.none");
     row.querySelector<HTMLElement>("[data-cal-clear]")!.hidden = !st.stats;
+    row.querySelector<HTMLElement>("[data-cal-save]")!.hidden = !st.stats;
     const use = row.querySelector<HTMLInputElement>("[data-cal-use]");
     if (use) {
       use.disabled = !st.stats || mismatch;
@@ -81,7 +85,7 @@ function renderCal() {
 function sendCalUse() {
   const use = (k: CalKind) => !!document.querySelector<HTMLInputElement>(`[data-cal-use="${k}"]`)?.checked && !!calState[k].stats && !calMismatch(k)
     && (k !== "flat" || !calMismatch("flatDark"));
-  send({ type: "calibration-use", dark: use("dark"), flat: use("flat") });
+  send({ type: "calibration-use", dark: use("dark"), flat: use("flat"), scaleDark: $<HTMLInputElement>("calScale").checked });
   requestPreview();
   player.redraw();
 }
@@ -105,6 +109,32 @@ for (const row of document.querySelectorAll<HTMLElement>(".calRow")) {
     sendCalUse();
   });
   row.querySelector<HTMLInputElement>("[data-cal-use]")?.addEventListener("change", sendCalUse);
+  row.querySelector("[data-cal-save]")!.addEventListener("click", () => send({ type: "save-master", kind: k }));
+}
+$<HTMLInputElement>("calScale").addEventListener("change", sendCalUse);
+const MASTER_NAME: Record<CalKind, string> = { dark: "master_dark.fits", flat: "master_flat.fits", flatDark: "master_bias.fits" };
+/** Master-Datei speichern: Speichern-Dialog (Chrome/Edge, Windows-App) oder Download */
+async function saveMasterFile(kind: CalKind, bytes: Uint8Array<ArrayBuffer>) {
+  const name = MASTER_NAME[kind];
+  const w = window as unknown as { showSaveFilePicker?: (o: object) => Promise<FileSystemFileHandle> };
+  try {
+    if (w.showSaveFilePicker) {
+      const h = await w.showSaveFilePicker({ suggestedName: name, types: [{ description: "FITS", accept: { "image/fits": [".fits"] } }] });
+      const wr = await (h as unknown as { createWritable(): Promise<{ write(d: BufferSource): Promise<void>; close(): Promise<void> }> }).createWritable();
+      await wr.write(bytes);
+      await wr.close();
+      log(L("cal.saved", h.name));
+      return;
+    }
+  } catch (e) {
+    if ((e as Error).name === "AbortError") return;
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([bytes], { type: "image/fits" }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  log(L("cal.saved", name));
 }
 
 // ---------- Vorlagen ----------
@@ -167,6 +197,7 @@ function syncAnchor() {
   const on = options.centreMode === "surface";
   const a = options.surfaceAnchor;
   $("anchorRow").hidden = !on;
+  document.querySelectorAll<HTMLElement>(".surfaceOpt").forEach((el) => (el.hidden = !on));
   $("anchorText").textContent = a ? L("opt.anchorSet", a.width, a.height, a.x, a.y) : L("opt.anchorHint");
   $<HTMLButtonElement>("anchorClear").hidden = !a;
   $("inCanvas").classList.toggle("drawAnchor", on);
@@ -231,6 +262,81 @@ function openFiles(list: FileList | File[] | null | undefined) {
   send({ type: "open", files, bigEndian: false, rawMode: $<HTMLSelectElement>("rawMode").value as "raw" | "preview" });
 }
 
+// ---------- Zuletzt geöffnet (Datei-Handles, nur wo showOpenFilePicker existiert) ----------
+/** Handles der Dateien, die gerade geöffnet werden – nach erfolgreichem Öffnen gemerkt */
+let pendingHandles: Promise<FileSystemFileHandle[] | null> | null = null;
+const OPEN_EXT = $<HTMLInputElement>("file").accept.split(",");
+async function renderRecent() {
+  const list = await recentList();
+  $("recentWrap").hidden = !list.length;
+  const menu = $("recentMenu");
+  menu.replaceChildren(...list.map((e) => recentItem(e)));
+}
+function recentItem(e: RecentEntry): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "recentItem";
+  const open = document.createElement("button");
+  open.className = "recentOpen";
+  open.setAttribute("role", "menuitem");
+  open.textContent = e.label;
+  if (e.count > 1) open.append(" ", Object.assign(document.createElement("small"), { textContent: `(${L("recent.files", e.count)})` }));
+  open.title = e.label;
+  open.addEventListener("click", async () => {
+    closeRecent();
+    try {
+      const files = await filesOf(e);
+      pendingHandles = Promise.resolve(e.handles);
+      openFiles(files);
+    } catch {
+      showError(L("recent.missing"));
+    }
+  });
+  const forget = document.createElement("button");
+  forget.className = "recentForget";
+  forget.textContent = "✕";
+  forget.title = L("recent.forget");
+  forget.setAttribute("aria-label", L("recent.forget"));
+  forget.addEventListener("click", async () => {
+    await forgetRecent(e.id!);
+    await renderRecent();
+  });
+  row.append(open, forget);
+  return row;
+}
+function closeRecent() {
+  $("recentMenu").hidden = true;
+  $("recentBtn").setAttribute("aria-expanded", "false");
+}
+$("recentBtn").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  const menu = $("recentMenu");
+  menu.hidden = !menu.hidden;
+  $("recentBtn").setAttribute("aria-expanded", String(!menu.hidden));
+});
+document.addEventListener("click", (ev) => { if (!$("recentWrap").contains(ev.target as Node)) closeRecent(); });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeRecent(); });
+if (recentSupported) {
+  void renderRecent();
+  // Öffnen über showOpenFilePicker: liefert Handles, die sich merken lassen
+  $("file").closest("label")!.addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    try {
+      const pick = (window as unknown as { showOpenFilePicker(o: object): Promise<FileSystemFileHandle[]> }).showOpenFilePicker;
+      const handles = await pick({ multiple: true, types: [{ description: "Astrotool", accept: { "application/octet-stream": OPEN_EXT } }] });
+      const files = await Promise.all(handles.map((h) => h.getFile()));
+      pendingHandles = Promise.resolve(handles);
+      openFiles(files);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") $<HTMLInputElement>("file").click(); // Notlösung: gewohnter Dialog
+    }
+  });
+}
+/** Für den automatischen Test: Dateien über Handles öffnen (wie aus dem Öffnen-Dialog) */
+(window as unknown as { __openHandles: (h: FileSystemFileHandle[]) => Promise<void> }).__openHandles = async (handles) => {
+  pendingHandles = Promise.resolve(handles);
+  openFiles(await Promise.all(handles.map((h) => h.getFile())));
+};
+
 $<HTMLInputElement>("file").addEventListener("change", (e) => {
   openFiles((e.target as HTMLInputElement).files);
 });
@@ -245,6 +351,14 @@ for (const target of [drop, document.body]) {
   target.addEventListener("drop", (e) => {
     e.preventDefault();
     drop.classList.remove("over");
+    // Handles gleich im Ereignis anfordern (später sind die Einträge leer) – für „Zuletzt geöffnet“
+    if (recentSupported && e.dataTransfer) {
+      const items = [...e.dataTransfer.items].filter((i) => i.kind === "file");
+      const reqs = items.map((i) => (i as DataTransferItem & { getAsFileSystemHandle?: () => Promise<FileSystemHandle | null> }).getAsFileSystemHandle?.());
+      pendingHandles = reqs.every(Boolean)
+        ? Promise.all(reqs).then((hs) => (hs.every((h) => h?.kind === "file") ? (hs as FileSystemFileHandle[]) : null)).catch(() => null)
+        : null;
+    }
     openFiles(e.dataTransfer?.files);
   });
 }
@@ -642,6 +756,11 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       break;
     case "opened": {
       info = m.info;
+      if (pendingHandles) {
+        const p = pendingHandles;
+        pendingHandles = null;
+        void p.then((h) => (h ? rememberRecent(h) : undefined)).then(renderRecent);
+      }
       // Ankerbox gehört zur vorigen Aufnahme
       options.surfaceAnchor = null;
       syncAnchor();
@@ -671,6 +790,10 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       draw($("outCanvas"), m.output);
       $("inLabel").textContent = `${m.name}${m.time ? " · " + m.time.slice(11, 19) : ""}`;
       renderVerdict(m);
+      break;
+    }
+    case "master-file": {
+      void saveMasterFile(m.kind, m.bytes as Uint8Array<ArrayBuffer>);
       break;
     }
     case "calibrated": {

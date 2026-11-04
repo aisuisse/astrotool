@@ -196,3 +196,32 @@ export function resize(f: Frame, ow: number, oh: number): Frame {
   }
   return { ...f, width: ow, height: oh, data: out };
 }
+
+/**
+ * Ausschnitt cw × ch, dessen Mitte bei (cx, cy) im Bild liegt, um angle gedreht entnommen (bilinear): Punkt v
+ * relativ zur Ausschnittmitte kommt von (cx, cy) + R(angle)·v. So wird eine gemessene Drehung des Bildinhalts
+ * ausgeglichen. Das Bild muss farbig oder grau sein (keine Bayer-Rohdaten).
+ */
+export function rotatedCrop(f: Frame, cx: number, cy: number, angle: number, cw: number, ch: number): Frame {
+  const { width: w, height: h, planes: p, data: d } = f;
+  const out = d instanceof Uint16Array ? new Uint16Array(cw * ch * p) : new Uint8Array(cw * ch * p);
+  const c = Math.cos(angle), s = Math.sin(angle);
+  for (let y = 0; y < ch; y++) {
+    const vy = y + 0.5 - ch / 2;
+    for (let x = 0; x < cw; x++) {
+      const vx = x + 0.5 - cw / 2;
+      const sx = cx + c * vx - s * vy - 0.5, sy = cy + s * vx + c * vy - 0.5;
+      const x0 = Math.floor(sx), y0 = Math.floor(sy);
+      if (x0 < 0 || y0 < 0 || x0 + 1 >= w || y0 + 1 >= h) continue; // ausserhalb: schwarz
+      const fx = sx - x0, fy = sy - y0;
+      const i00 = (y0 * w + x0) * p, i10 = i00 + p, i01 = i00 + w * p, i11 = i01 + p;
+      const o = (y * cw + x) * p;
+      for (let k = 0; k < p; k++) {
+        const top = d[i00 + k] + (d[i10 + k] - d[i00 + k]) * fx;
+        const bot = d[i01 + k] + (d[i11 + k] - d[i01 + k]) * fx;
+        out[o + k] = Math.round(top + (bot - top) * fy);
+      }
+    }
+  }
+  return { ...f, width: cw, height: ch, data: out };
+}

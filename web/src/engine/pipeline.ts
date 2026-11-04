@@ -7,8 +7,8 @@ import { quality, type QualityOptions, defaultQuality } from "./quality";
 import { SerColor, SerReader, SerWriter, type Frame } from "./ser";
 import { debayer, patternFromColorId, type BayerPattern } from "./debayer";
 import { serSource, type FrameSource } from "./source";
-import { SurfaceAligner, type SurfaceBox, type SurfaceShift } from "./surface";
-import { bayerAfterTransform, hasTransform, transformFrame, transformedSize, type TransformOptions } from "./transform";
+import { SurfaceTracker, type SurfaceBox, type SurfaceMotion } from "./surface";
+import { bayerAfterTransform, hasTransform, rotatedCrop, transformFrame, transformedSize, type TransformOptions } from "./transform";
 import { isBayer } from "./ser";
 import { msg } from "../i18n";
 
@@ -41,6 +41,10 @@ export interface ProcessOptions extends TransformOptions {
    * (eine markante Stelle, z. B. ein Krater). null = ganzes Bild. Wie „Anchor“ bei PIPP.
    */
   surfaceAnchor: SurfaceBox | null;
+  /** "surface": Referenz bei langen Serien nachführen (Struktur ändert sich langsam) */
+  surfaceFollow: boolean;
+  /** "surface": Bilddrehung messen und ausgleichen (Feldrotation). Farbkameras werden dann farbig gespeichert. */
+  surfaceRotation: boolean;
   cropEnabled: boolean;
   cropWidth: number; // (-cx=)
   cropHeight: number; // (-cy=)
@@ -84,6 +88,8 @@ export const defaultOptions: ProcessOptions = {
   centre: true,
   centreMode: "object",
   surfaceAnchor: null,
+  surfaceFollow: true,
+  surfaceRotation: false,
   cropEnabled: true,
   cropWidth: 448,
   cropHeight: 448,
@@ -138,6 +144,8 @@ export function colouriseOutput(f: Frame, o: ProcessOptions): Frame {
 /** Farbkennung des SER-Ausgabevideos. width/height: Grösse des Ausschnitts vor der Bearbeitung. */
 export function outputColorId(o: ProcessOptions, src: { colorId: number; planes?: number }, width = 2, height = 2): number {
   const pattern = bayerPatternFor(o, src);
+  // Drehung ausgleichen: Bilder werden vorher farbig gemacht
+  if (pattern && rotates(o)) return o.mono ? SerColor.MONO : SerColor.RGB;
   if (!hasTransform(o)) return o.debayerSer && pattern ? SerColor.RGB : src.colorId;
   if (pattern) {
     const kept = o.debayer === "auto" ? bayerAfterTransform(o, src.colorId, width, height) : null;
@@ -146,6 +154,11 @@ export function outputColorId(o: ProcessOptions, src: { colorId: number; planes?
   }
   if (isBayer(src.colorId)) return bayerAfterTransform(o, src.colorId, width, height) ?? SerColor.MONO; // Debayer aus
   return o.mono ? SerColor.MONO : src.colorId;
+}
+
+/** Oberfläche mit Ausgleich der Bilddrehung */
+function rotates(o: Pick<ProcessOptions, "centreMode" | "surfaceRotation">): boolean {
+  return o.centreMode === "surface" && o.surfaceRotation;
 }
 
 /** Grösse der gespeicherten Bilder (nach Zuschnitt und Bearbeitung). */
@@ -164,15 +177,15 @@ export interface FrameDetection extends Detection {
     /** Totalität: geschätzte Sonnenmitte (aus dem Abstand Sonne–Mond der partiellen Phasen) */
     sun?: { cx: number; cy: number };
   };
-  /** Oberfläche: Verschiebung gegenüber dem Referenzbild und Sicherheit (0…1) */
-  surface?: SurfaceShift;
+  /** Oberfläche: Verschiebung (und Drehung) gegenüber dem Referenzbild und Sicherheit (0…1) */
+  surface?: SurfaceMotion;
 }
 
 /** Mindest-Übereinstimmung mit dem Referenzbild (fremde Bilder: um 0.1, gleiche Stelle: 0.5–1) */
 export const SURFACE_MIN_PEAK = 0.2;
 
 /** Erkennung für die Oberflächen-Stabilisierung: Mitte = Bildmitte + Verschiebung gegenüber der Referenz */
-function surfaceDetection(lum: Lum, s: SurfaceShift): FrameDetection {
+function surfaceDetection(lum: Lum, s: SurfaceMotion): FrameDetection {
   let max = 0, over = 0, n = 0;
   for (let i = 0; i < lum.data.length; i += 7, n++) {
     if (lum.data[i] > max) max = lum.data[i];
@@ -286,6 +299,26 @@ function originFor(src: FrameSource, o: ProcessOptions, det: FrameDetection): [n
   const [cw, ch] = outSize(src, o);
   const [cx, cy] = centreOf(src, o, det);
   return cropOrigin(cx - o.offsetX, cy - o.offsetY, cw, ch, src.colorId, bayerPatternFor(o, src) !== null);
+}
+
+/**
+ * Ausgabe-Ausschnitt eines Bildes. Mit Ausgleich der Bilddrehung: etwas grösser ausschneiden, farbig machen und
+ * um die Bildmitte zurückdrehen (bilinear, mit Unterpixel-Lage); sonst wie gewohnt ausschneiden.
+ */
+function outputCrop(src: FrameSource, frame: Frame, o: ProcessOptions, det: FrameDetection, cw: number, ch: number): Frame {
+  if (!rotates(o)) {
+    const [x0, y0] = originFor(src, o, det);
+    return cropFrame(frame, x0, y0, cw, ch);
+  }
+  const angle = det.surface?.angle ?? 0;
+  const [cx0, cy0] = centreOf(src, o, det);
+  const cx = cx0 - o.offsetX, cy = cy0 - o.offsetY;
+  const c = Math.abs(Math.cos(angle)), s = Math.abs(Math.sin(angle));
+  const mx = Math.ceil((c * cw + s * ch - cw) / 2) + 2, my = Math.ceil((s * cw + c * ch - ch) / 2) + 2;
+  const bw = cw + 2 * mx, bh = ch + 2 * my;
+  const [x0, y0] = cropOrigin(cx, cy, bw, bh, frame.colorId, bayerPatternFor(o, frame) !== null);
+  const big = colourise(cropFrame(frame, x0, y0, bw, bh), o);
+  return rotatedCrop(big, cx - x0, cy - y0, angle, cw, ch);
 }
 
 export function judge(index: number, det: FrameDetection, o: ProcessOptions): FrameResult {
@@ -429,13 +462,13 @@ export async function analyseFrame(src: FrameSource | SerReader, index: number, 
     // Vorschau: gegen das erste Bild des Bereichs ausrichten (wie bei der Verarbeitung)
     const refIndex = frameRange(s, o)[0] ?? 0;
     const ref = refIndex === index ? lum : lumFor(s, await s.readFrame(refIndex), o);
-    det = surfaceDetection(lum, new SurfaceAligner(ref, o.surfaceAnchor).align(lum));
+    det = surfaceDetection(lum, new SurfaceTracker(ref, o.surfaceAnchor, { followRef: false, rotation: o.surfaceRotation }).align(lum));
   } else det = detect(lum, o);
   const [x0, y0] = originFor(s, o, det);
   const [cw, ch] = outSize(s, o);
   const res = judge(index, det, o);
   res.score = o.qualityEnabled && res.accepted ? quality(cropLum(lum, x0, y0, cw, ch), o.quality) : 0;
-  return { frame: colourise(frame, o), det, result: res, crop: { x0, y0, width: cw, height: ch }, output: colouriseOutput(finishFrame(cropFrame(frame, x0, y0, cw, ch), o), o) };
+  return { frame: colourise(frame, o), det, result: res, crop: { x0, y0, width: cw, height: ch }, output: colouriseOutput(finishFrame(outputCrop(s, frame, o, det, cw, ch), o), o) };
 }
 
 export async function processSource(
@@ -449,7 +482,7 @@ export async function processSource(
   const [cw, ch] = outSize(src, o);
   const results: FrameResult[] = [];
   // Oberfläche: erstes lesbares Bild ist die Referenz
-  let aligner: SurfaceAligner | null = null;
+  let aligner: SurfaceTracker | null = null;
 
   // Durchlauf 1: erkennen und bewerten
   for (let k = 0; k < indices.length; k++) {
@@ -466,7 +499,7 @@ export async function processSource(
     const lum = lumFor(src, frame, o);
     let det: FrameDetection;
     if (o.centreMode === "surface") {
-      aligner ??= new SurfaceAligner(lum, o.surfaceAnchor);
+      aligner ??= new SurfaceTracker(lum, o.surfaceAnchor, { followRef: o.surfaceFollow, rotation: o.surfaceRotation });
       det = surfaceDetection(lum, aligner.align(lum));
     } else det = detect(lum, o);
     const res = judge(indices[k], det, o);
@@ -540,8 +573,7 @@ export async function processSource(
       }
     } else {
       const frame = await src.readFrame(res.index);
-      const [x0, y0] = originFor(src, o, res.det);
-      await sink(finishFrame(cropFrame(frame, x0, y0, cw, ch), o), res, written.length, ts);
+      await sink(finishFrame(outputCrop(src, frame, o, res.det, cw, ch), o), res, written.length, ts);
       written.push(res.index);
     }
     onProgress("write", k + 1, chosen.length);

@@ -19,6 +19,10 @@
           <span data-i18n="btn.open">Open</span>
           <input id="file" type="file" accept=".ser,.avi,.mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden />
         </label>
+        <div id="recentWrap" class="recentWrap" hidden>
+          <button id="recentBtn" class="btn" aria-haspopup="true" aria-expanded="false" data-i18n="recent.btn">Recent ▾</button>
+          <div id="recentMenu" class="recentMenu" role="menu" hidden></div>
+        </div>
         <label class="btn">
           <span data-i18n="btn.importPof">Import PIPP options</span>
           <input id="pof" type="file" accept=".pof" hidden />
@@ -179,6 +183,8 @@
               <span id="anchorText"></span>
               <button type="button" id="anchorClear" data-i18n="opt.anchorClear">Remove anchor box</button>
             </div>
+            <label class="wide surfaceOpt" hidden><input type="checkbox" data-opt="surfaceFollow" /> <span data-i18n="opt.surfaceFollow">Follow the reference over long series (structure changes slowly)</span></label>
+            <label class="wide surfaceOpt" hidden><input type="checkbox" data-opt="surfaceRotation" /> <span data-i18n="opt.surfaceRotation">Detect and correct image rotation (field rotation of alt-az mounts) – colour cameras are then saved in colour</span></label>
             <label class="wide"><input type="checkbox" data-opt="totalitySunCentre" /> <span data-i18n="opt.totalitySunCentre">Totality: centre on the hidden sun (estimated from the partial phases) instead of the moon</span></label>
             <label class="wide"><input type="checkbox" data-opt="hdr" /> <span data-i18n="opt.hdr">Totality: merge exposure brackets into one HDR image (aligned on the lunar limb)</span></label>
             <label class="wide"><input type="checkbox" data-opt="cropEnabled" /> <span data-i18n="opt.crop">Crop</span></label>
@@ -217,23 +223,26 @@
             <div class="calRow" data-cal="dark">
               <label class="btn"><span data-i18n="cal.dark">Darks …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
               <label><input type="checkbox" data-cal-use="dark" disabled /> <span data-i18n="cal.apply">apply</span></label>
+              <label><input type="checkbox" id="calScale" checked /> <span data-i18n="cal.scale">scale to exposure</span></label>
+              <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
               <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
               <small class="calInfo"></small>
             </div>
             <div class="calRow" data-cal="flat">
               <label class="btn"><span data-i18n="cal.flat">Flats …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
               <label><input type="checkbox" data-cal-use="flat" disabled /> <span data-i18n="cal.apply">apply</span></label>
+              <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
               <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
               <small class="calInfo"></small>
             </div>
             <div class="calRow" data-cal="flatDark">
               <label class="btn"><span data-i18n="cal.flatDark">Flat darks / bias …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
-              
+              <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
               <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
               <small class="calInfo"></small>
             </div>
           </div>
-          <small class="unit" data-i18n="cal.hint">Same camera, gain and size as the recording. Darks: same exposure and temperature, lens covered. Flats: evenly lit, same focus. Several frames each are combined into a master.</small>
+          <small class="unit" data-i18n="cal.hint">Same camera, gain and size as the recording. Darks: same exposure and temperature, lens covered. Flats: evenly lit, same focus. Several frames each are combined into a master; a saved master (FITS) loads back the same way.</small>
         </section>
 
         <section class="card" id="transformCard">

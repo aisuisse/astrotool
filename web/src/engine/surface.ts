@@ -270,3 +270,154 @@ export class SurfaceAligner {
     return res;
   }
 }
+
+/** Lage eines Bildes gegenüber dem ersten: Punkt p des ersten Bildes liegt bei R(a)·p + (tx, ty) */
+interface Motion {
+  a: number;
+  tx: number;
+  ty: number;
+}
+const IDENTITY: Motion = { a: 0, tx: 0, ty: 0 };
+function moveTo(m: Motion, x: number, y: number): [number, number] {
+  const c = Math.cos(m.a), s = Math.sin(m.a);
+  return [c * x - s * y + m.tx, s * x + c * y + m.ty];
+}
+/** erst m1, dann m2 */
+function compose(m2: Motion, m1: Motion): Motion {
+  const [tx, ty] = moveTo({ a: m2.a, tx: 0, ty: 0 }, m1.tx, m1.ty);
+  return { a: m1.a + m2.a, tx: tx + m2.tx, ty: ty + m2.ty };
+}
+
+export interface SurfaceMotion extends SurfaceShift {
+  /** Drehung des Bildinhalts gegenüber dem ersten Bild (Bogenmass, im Uhrzeigersinn positiv; nur mit Drehung) */
+  angle?: number;
+}
+
+export interface TrackerOptions {
+  /** Referenz nachführen: sinkt die Übereinstimmung deutlich, wird das aktuelle Bild zur neuen Referenz */
+  followRef: boolean;
+  /** Bilddrehung messen (z. B. Feldrotation einer azimutalen Montierung) */
+  rotation: boolean;
+}
+
+/** Mindest-Sicherheit für Teilbereiche der Drehungsmessung */
+const ROT_MIN_PEAK = 0.15;
+
+/** Bild um (cx, cy) zurückdrehen: Ergebnis an q = Bild an (cx, cy) + R(angle)·(q − (cx, cy)), bilinear */
+function rotateLum(l: Lum, angle: number, cx: number, cy: number): Lum {
+  const { width: w, height: h, data: d } = l;
+  const out = new Float32Array(w * h);
+  const c = Math.cos(angle), s = Math.sin(angle);
+  for (let y = 0; y < h; y++) {
+    const vy = y - cy;
+    for (let x = 0; x < w; x++) {
+      const vx = x - cx;
+      const sx = cx + c * vx - s * vy, sy = cy + s * vx + c * vy;
+      const x0 = Math.floor(sx), y0 = Math.floor(sy);
+      if (x0 < 0 || y0 < 0 || x0 + 1 >= w || y0 + 1 >= h) continue;
+      const fx = sx - x0, fy = sy - y0, i = y0 * w + x0;
+      out[y * w + x] = (d[i] * (1 - fx) + d[i + 1] * fx) * (1 - fy) + (d[i + w] * (1 - fx) + d[i + w + 1] * fx) * fy;
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+
+/**
+ * Oberflächen-Stabilisierung über eine ganze Serie, aufbauend auf SurfaceAligner:
+ * - Referenz nachführen: Die Übereinstimmung der ersten Bilder nach einem Referenzwechsel ist der Massstab. Fällt
+ *   sie auf 35–60 % davon (Struktur verändert sich langsam: Granulation, Licht, Drehung), wird das aktuelle Bild
+ *   zur Referenz; seine Lage wird übernommen, damit alle Bilder weiter auf das erste ausgerichtet sind. Viel
+ *   schlechtere Bilder (Wolke) werden nie Referenz.
+ * - Drehung: Der ausgewertete Bereich wird zusätzlich in eine linke/rechte und eine obere/untere Hälfte geteilt.
+ *   Dreht sich der Inhalt um θ, verschieben sich die Hälften gegensinnig um (Breite/2)·sin θ – daraus die Drehung,
+ *   gemittelt über beide Teilungen. Ein gedrehter Inhalt verfälscht die Verschiebung (bis 2 px bei 2°); deshalb
+ *   wird das Bild um die gefundene Drehung zurückgedreht und Verschiebung und Restdrehung neu gemessen (≤ 3 Mal).
+ * Ergebnis: Verschiebung der Bildmitte und Drehung, jeweils gegenüber dem ersten Bild.
+ */
+export class SurfaceTracker {
+  private main!: SurfaceAligner;
+  private parts: SurfaceAligner[] | null = null;
+  private box!: SurfaceBox;
+  private readonly anchored: boolean;
+  private toRef: Motion = IDENTITY;
+  private peaks: number[] = [];
+  /** Anzahl der Referenzwechsel */
+  refChanges = 0;
+
+  constructor(ref: Lum, anchor: SurfaceBox | null, private readonly o: TrackerOptions) {
+    this.anchored = !!clampAnchor(anchor, ref.width, ref.height);
+    this.setRef(ref, anchor);
+  }
+
+  private setRef(ref: Lum, anchor: SurfaceBox | null) {
+    this.main = new SurfaceAligner(ref, anchor);
+    this.box = this.main.region;
+    this.peaks = [];
+    this.parts = null;
+    if (this.o.rotation) {
+      const { x, y, width: w, height: h } = this.box;
+      const hw = Math.floor(w / 2), hh = Math.floor(h / 2);
+      const boxes = [
+        { x, y, width: hw, height: h }, { x: x + hw, y, width: w - hw, height: h },
+        { x, y, width: w, height: hh }, { x, y: y + hh, width: w, height: h - hh },
+      ];
+      if (boxes.every((b) => b.width >= 2 * MIN_ANCHOR && b.height >= 2 * MIN_ANCHOR)) this.parts = boxes.map((b) => new SurfaceAligner(ref, b));
+    }
+  }
+
+  /** Drehung aus den Hälften (0, wenn nicht messbar) */
+  private partAngle(img: Lum): number {
+    const { width: bw, height: bh } = this.box;
+    const [l, r, t, b] = this.parts!.map((p) => p.align(img));
+    const est: number[] = [];
+    const asin = (v: number) => Math.asin(Math.max(-1, Math.min(1, v)));
+    if (l.peak >= ROT_MIN_PEAK && r.peak >= ROT_MIN_PEAK) est.push(asin((r.dy - l.dy) / (bw / 2)));
+    if (t.peak >= ROT_MIN_PEAK && b.peak >= ROT_MIN_PEAK) est.push(asin((t.dx - b.dx) / (bh / 2)));
+    return est.length ? est.reduce((a, v) => a + v, 0) / est.length : 0;
+  }
+
+  align(cur: Lum): SurfaceMotion {
+    let s = this.main.align(cur);
+    const { x, y, width: bw, height: bh } = this.box;
+    const bcx = x + bw / 2, bcy = y + bh / 2;
+    let theta = 0;
+    // Verschiebung gegenüber der Referenz (bei Drehung: im zurückgedrehten Bild gemessen, dann mitgedreht)
+    let dx = s.dx, dy = s.dy;
+    if (this.parts && s.peak >= ROT_MIN_PEAK) {
+      theta = this.partAngle(cur);
+      for (let k = 0; k < 3 && Math.abs(theta) > 2e-4; k++) {
+        // zurückgedreht ist der Inhalt nur noch verschoben (um R(−θ)·d)
+        const back = rotateLum(cur, theta, bcx, bcy);
+        const sb = this.main.align(back);
+        if (sb.peak < ROT_MIN_PEAK) break;
+        s = { ...sb };
+        const [rx, ry] = moveTo({ a: theta, tx: 0, ty: 0 }, sb.dx, sb.dy);
+        dx = rx;
+        dy = ry;
+        const rest = this.partAngle(back);
+        theta += rest;
+        if (Math.abs(rest) < 2e-4) break;
+      }
+    }
+    // gegenüber der Referenz: Drehung um die Mitte des Bereichs, dann Verschiebung
+    const [rx, ry] = moveTo({ a: theta, tx: 0, ty: 0 }, bcx, bcy);
+    const total = compose({ a: theta, tx: bcx + dx - rx, ty: bcy + dy - ry }, this.toRef);
+    const cx = cur.width / 2, cy = cur.height / 2;
+    const [mx, my] = moveTo(total, cx, cy);
+    const res: SurfaceMotion = { dx: mx - cx, dy: my - cy, peak: s.peak };
+    if (this.o.rotation) res.angle = total.a;
+    if (this.o.followRef && s.peak >= 0.3) {
+      if (this.peaks.length < 5) this.peaks.push(s.peak);
+      else {
+        const ref = [...this.peaks].sort((a, b) => a - b)[2];
+        if (s.peak < 0.6 * ref && s.peak >= 0.35 * ref) {
+          this.toRef = total;
+          const next = this.anchored ? clampAnchor({ x: x + Math.round(dx), y: y + Math.round(dy), width: bw, height: bh }, cur.width, cur.height) : null;
+          this.setRef(cur, next);
+          this.refChanges++;
+        }
+      }
+    }
+    return res;
+  }
+}

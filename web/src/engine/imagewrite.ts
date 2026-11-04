@@ -155,7 +155,8 @@ const BAYER: Record<number, string> = {
   [SerColor.BAYER_RGGB]: "RGGB", [SerColor.BAYER_GRBG]: "GRBG", [SerColor.BAYER_GBRG]: "GBRG", [SerColor.BAYER_BGGR]: "BGGR",
 };
 
-function card(key: string, value?: string | number | boolean, comment?: string): string {
+/** Eine FITS-Kopfzeile (80 Zeichen) */
+export function card(key: string, value?: string | number | boolean, comment?: string): string {
   let s = key.padEnd(8);
   if (value !== undefined) {
     const v = typeof value === "boolean" ? (value ? "T" : "F")

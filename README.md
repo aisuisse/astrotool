@@ -57,11 +57,11 @@ The app is not code-signed yet, so Windows SmartScreen may show *"Windows protec
 | Eclipse phase montage: selected frames as an arc (path of the sun), row or grid, totality in the middle, time under each disc, one large PNG | – (new) | ✅ |
 | Time-lapse: HEVC, H.264, WebM, GIF; frame rate, hold last frame, ping-pong, time and title overlay | `-anim_fwd -anim_rev -anim_fwd_lf_rep= -fps_rate= -gif` | ✅ |
 | Import PIPP option files (`.pof`) | – | ✅ |
-| Viewer (SER Player style), night mode, English/German UI | – | ✅ |
-| Dark/flat calibration: masters from SER, video, image or RAW series (average without the highest and lowest value), flat dark/bias, colour-neutral flats for Bayer data; applied before cropping and debayering | dark/flat | ✅ |
+| Viewer (SER Player style), night mode, English/German UI, list of recently opened files (0.28) | – | ✅ |
+| Dark/flat calibration: masters from SER, video, image or RAW series (average without the highest and lowest value), flat dark/bias, colour-neutral flats for Bayer data; applied before cropping and debayering; darks scaled to a different exposure, masters saved and loaded as FITS (0.28) | dark/flat | ✅ |
 | Reading FITS: single images (grey, Bayer, colour; 8/16/32 bit, float) with time and exposure from the header – also as darks/flats; cubes with many frames in one file (0.25) open like a video | FITS | ✅ |
 | Fujifilm X-Trans sensor data (uncompressed RAF, DNG) with own colour reconstruction; compressed CR3/RAF: Canon/Fuji do not publish the format – convert with the free Adobe DNG Converter | – | ✅ |
-| Surface stabilisation for lunar/solar close-ups without a full limb: every frame aligned to the first by its surface structure (own FFT, sub-pixel), frames without matching structure (clouds) rejected; optional anchor box drawn in the preview (0.24) | surface feature | ✅ |
+| Surface stabilisation for lunar/solar close-ups without a full limb: every frame aligned to the first by its surface structure (own FFT, sub-pixel), frames without matching structure (clouds) rejected; optional anchor box drawn in the preview (0.24); reference follows slowly changing structure in long series, image rotation (field rotation) detected and corrected (0.28) | surface feature | ✅ |
 
 Everything runs locally – your files never leave your computer.
 
@@ -79,7 +79,7 @@ npm test            # unit tests
 
 Without your own recordings: `npm run sample` creates `sample-jupiter.ser` (a synthetic planet with seeing).
 
-The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 45 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
+The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 48 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
 
 ## How it is built
 
