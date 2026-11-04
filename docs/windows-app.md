@@ -28,7 +28,7 @@ Ergebnis (Build-Ordner ausserhalb von „Dokumente“, siehe unten):
 - `%LOCALAPPDATA%\astrotool-build\release\astrotool.exe` – die App selbst (startet ohne Installation, braucht WebView2)
 - `%LOCALAPPDATA%\astrotool-build\release\bundle\nsis\Astrotool_<version>_x64-setup.exe` – Installer zum Weitergeben
 
-**Warum ausserhalb von „Dokumente“?** Windows setzt bei „Dokumente“ und Unterordnern oft das Attribut „schreibgeschützt“, das neue Ordner erben. Einige Rust-Build-Skripte (`autocfg`) brechen dann mit „output path is not a writable directory“ ab. `web/scripts/tauri.mjs` setzt deshalb `CARGO_TARGET_DIR` auf `%LOCALAPPDATA%\astrotool-build` und ergänzt `~\.cargo\bin` im PATH.
+**Warum ausserhalb von „Dokumente“?** Windows setzt bei „Dokumente“ und Unterordnern oft das Attribut „schreibgeschützt“, das neue Ordner erben. Einige Rust-Build-Skripte (`autocfg`) brechen dann mit „output path is not a writable directory“ ab. `web/scripts/tauri.mjs` setzt deshalb `CARGO_TARGET_DIR` auf `%LOCALAPPDATA%\astrotool-build` und ergänzt `~\.cargo\bin` im PATH. Ausserdem ersetzt es mit `--remap-path-prefix` die Pfade des Rechners (Benutzerordner, `.cargo`, `.rustup`, Repo) durch Platzhalter wie `/cargo` – sonst stünde der Benutzername in den Pfaden, die Rust für Fehlermeldungen in die .exe schreibt.
 
 **Hinweis Claude-Desktop-App:** Wird der Build aus der Claude-App heraus gestartet, leitet Windows `%LOCALAPPDATA%` in den App-Container um (`AppData\Local\Packages\Claude_…\LocalCache\Local\astrotool-build`). Fertige Versionen werden deshalb nach `REA\Astrotool-App\<version>\` kopiert (Installer, portable .exe, LIESMICH).
 

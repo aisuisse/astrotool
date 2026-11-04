@@ -68,12 +68,13 @@ Wiedergabe von Farb-SER: in der Windows-App 29.8 Bilder/s (Volltest 03.11.2026),
 
 ## Checkliste vor dem Veröffentlichen des Repos
 
-Stand 04.11.2026 (0.25.0).
+Stand 04.11.2026 (0.25.0). **Veröffentlicht am 04.11.2026:** Repo öffentlich, Release v0.25.0 mit Installer und portabler .exe.
 
-- [ ] Git-Verlauf zu einem frischen ersten Commit zusammenfassen – ältere Commits enthalten persönliche Pfade und eine frühere Fassung von `docs/images/tools.jpg` mit dem Benutzernamen im Bild
+- [x] Git-Verlauf zusammengefasst (04.11.2026): alter Verlauf (42 Commits) lokal in `Astrotool-App\astrotool-verlauf-2026-11-04.bundle`; da GitHub die alten Commits nach dem Force-Push über ihre Kennung weiter auslieferte, wurde das Repo gelöscht und gleich benannt neu angelegt (Beschreibung, Themen, Website neu gesetzt) – alte Kennungen jetzt „nicht gefunden“
 - [x] Heutiger Stand ohne persönliche Daten (04.11.2026): alle 127 Dateien nach Benutzername, Benutzerpfaden und E-Mail-Adressen durchsucht; Bilder ohne EXIF/GPS/XMP; Benutzerpfad in `tools.jpg` überdeckt, `app-showcase.mjs` ersetzt ihn künftig vor dem Bildschirmfoto durch `<user>`; Pfad in `SHOWCASE.md` entfernt
-- [x] Entschieden (04.11.2026): `docs/vergleich-sofi-2026` wird **nicht** veröffentlicht – beim Veröffentlichen aus dem Repo nehmen (siehe Ablauf unten); das Genauigkeitsbild `docs/images/accuracy-pipp-vs-astrotool.jpg` bleibt
-- [x] Entschieden (04.11.2026): `docs/showcase/` bleibt privat (Übergabe-Notizen, Megamovie-Bilder ohne Lizenzangabe) – beim Veröffentlichen aus dem Repo nehmen
+- [x] `docs/vergleich-sofi-2026` nicht veröffentlicht: per `.gitignore` aus dem Repo genommen (bleibt lokal am selben Ort, Kopie in `Astrotool-App\portfolio\repo-privat\`); das Genauigkeitsbild `docs/images/accuracy-pipp-vs-astrotool.jpg` bleibt
+- [x] `docs/showcase/` privat: wie oben per `.gitignore` herausgenommen, lokal unverändert (Portfolio-Agent nutzt ihn weiter)
+- [x] .exe ohne Benutzerpfade: Rust schrieb die Pfade von `.cargo` in die .exe (309 Treffer); `scripts/tauri.mjs` ersetzt sie jetzt per `--remap-path-prefix`, neu gebaut, 0 Treffer, Volltest 40/40
 - [x] CLA-Hinweis für Beiträge (CONTRIBUTING.md, englisch) – CLA-Text selbst noch offen
 - [ ] CLA-Text festlegen – Entwurf 0.1 in `CLA.md` (04.11.2026, eigener Text, englisch): Urheberrecht bleibt bei Mitwirkenden, Lizenz an aisuisse für GPL und andere Bedingungen, Patentlizenz, Zusicherungen (kein PIPP-/SER-Player-Code), Zustimmung per Kommentar im ersten Pull Request. Offen: juristische Prüfung, Zusage „bleibt auch unter GPL“ (Abschnitt 6) behalten?, Aufzeichnung von Hand oder per CLA-Bot, anwendbares Recht
 - [x] Englische Texte für GitHub: README.md (Deutsch in README.de.md), Beschreibung, Themen; Release-Notes in docs/github/ABOUT.md auf 0.25.0 nachgeführt (04.11.2026)
