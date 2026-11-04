@@ -589,7 +589,8 @@ try {
       await sleep(3000);
       return { info: i };
     });
-    for (const [sub, re, title] of [["cr2", /CR2/, "IMG_"], ["dng", /DNG lossless/, "NM2A"], ["nef", /NEF compressed/, "DSC_"], ["cr3", /JPEG.*CR3.*DNG Converter/, "Donald"], ["raf", /JPEG.*RAF.*DNG Converter/, "_DSF"], ["raf-unc", /RAF uncompressed.*(Sensordaten|sensor data)/, "DSCF"], ["srw", /SRW compressed/, "SAM_"]]) {
+    for (const [sub, re, title] of [["cr2", /CR2/, "IMG_"], ["dng", /DNG lossless/, "NM2A"], ["nef", /NEF compressed/, "DSC_"], ["cr3", /JPEG.*CR3.*DNG Converter/, "Donald"], ["raf", /JPEG.*RAF.*DNG Converter/, "_DSF"], ["raf-unc", /RAF uncompressed.*(Sensordaten|sensor data)/, "DSCF"], ["srw", /SRW compressed/, "SAM_"],
+      ["arw-lossy", /ARW compressed/, "_DSC0009"], ["srw-nx300", /SRW compressed/, "nx300"], ["srw-nx100", /SRW packed/, "RAW_SAMSUNG"], ["raf-bayer", /RAF uncompressed \(Bayer\)/, "DSCF0617"]]) {
       if (!readdirSync(rawDir).includes(sub)) continue;
       await test(`RAW: ${sub.toUpperCase()} öffnen und Vorschau`, async () => {
         // alte Beurteilung leeren, damit nur die neue Vorschau zählt

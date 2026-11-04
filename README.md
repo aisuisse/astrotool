@@ -41,7 +41,7 @@ The app is not code-signed yet, so Windows SmartScreen may show *"Windows protec
 | Read AVI: 8/16-bit mono, raw Bayer, 24/32-bit BGR, MJPEG, files > 4 GB (OpenDML) | – | ✅ |
 | Read MP4, MOV, MKV, WebM via the system video decoder, capture date from metadata | – | ✅ |
 | Image series (JPG, PNG, TIFF, camera RAW), sorted by EXIF capture time | – | ✅ |
-| Camera RAW: 16-bit linear Bayer sensor data from DNG, CR2, ARW (lossless) Nikon-compressed NEF and Samsung SRW (NX1/NX500); white balance from the camera (NEF, SRW) or derived from the camera's own image | – | ✅ |
+| Camera RAW: 16-bit linear Bayer sensor data from DNG, CR2, Sony ARW (lossless, lossy "cRAW" and uncompressed, 0.27), Nikon-compressed NEF, Samsung SRW (NX1/NX500, NX300 family and NX100 family, 0.27) and Fujifilm RAF with Bayer sensor (e.g. X-A5, 0.27); white balance from the camera (NEF, SRW) or derived from the camera's own image | – | ✅ |
 | Object check, minimum size, automatic/manual threshold | `-chk -ms= -mp=` | ✅ |
 | Reject overexposed frames (share of the object at saturation; totality exempt) (0.26) | `-oe=` | ✅ |
 | Edit frames: greyscale, mirror, rotate by 90/180/270°, resize in % – raw Bayer data stays raw when only mirroring/rotating (0.26) | `-convmono -flip_x -flip_y -rotate90 -resize_en` | ✅ |
@@ -79,7 +79,7 @@ npm test            # unit tests
 
 Without your own recordings: `npm run sample` creates `sample-jupiter.ser` (a synthetic planet with seeing).
 
-The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 41 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
+The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 45 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
 
 ## How it is built
 

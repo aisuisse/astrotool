@@ -1,9 +1,10 @@
 // RAW Stufe 2: die echten Sensordaten (Bayer-Mosaik, 12–14 bit) statt des Kamera-JPEGs.
 // Unterstützt: DNG (verlustfrei JPEG in Kacheln/Streifen oder unkomprimiert), Canon CR2 (verlustfrei JPEG in
-// senkrechten Streifen), Sony ARW (verlustfrei, Kacheln mit 2×2-Blöcken; unkomprimiert), NEF, SRW,
-// Fujifilm RAF unkomprimiert und DNG mit X-Trans-Muster (6×6, wird hier zu RGB rekonstruiert).
-// Nicht: Sony-komprimierte ARW, CR3 und komprimierte RAF (Kompression nicht öffentlich beschrieben) – dafür gibt
-// es das eingebettete JPEG und den Hinweis auf den Adobe DNG Converter.
+// senkrechten Streifen), Sony ARW (verlustfrei, Kacheln mit 2×2-Blöcken; verlustbehaftet „cRAW“; unkomprimiert),
+// NEF, SRW (NX1/NX500, NX300-Familie, NX100-Familie gepackt), Fujifilm RAF unkomprimiert (X-Trans und Bayer,
+// auch gepackt) und DNG mit X-Trans-Muster (6×6, wird hier zu RGB rekonstruiert).
+// Nicht: CR3 und komprimierte RAF (Kompression nicht öffentlich beschrieben) – dafür gibt es das eingebettete
+// JPEG und den Hinweis auf den Adobe DNG Converter.
 //
 // Ausgabe: 16-bit-Bayer-Frame, Schwarzwert abgezogen und auf 0…65535 gestreckt, auf den sichtbaren Bereich
 // zugeschnitten, Farbmuster laut Datei. Weissabgleich: Faktoren je Farbe (siehe applyWhiteBalance).
@@ -142,6 +143,158 @@ function unslice(lj: ReturnType<typeof decodeLjpeg>, slices: number[]): Sensor {
     if (y < h) data[y * w + x] = lj.data[k];
   }
   return { w, h, data };
+}
+
+/**
+ * Dicht gepackte Werte (12 oder 14 bit ohne Lücken), höchstes Bit zuerst – so liegen die Daten der Samsung
+ * NX100-Familie (12 bit, Byte für Byte) und älterer Fujifilm-RAF mit Bayer-Sensor (14 bit, in 32-bit-Wörtern Little
+ * Endian, words32) vor. rowBytes: Bytes je Zeile.
+ */
+export function unpackBits(src: Uint8Array, w: number, h: number, bps: number, rowBytes: number, words32 = false): Uint16Array {
+  if (words32) {
+    // Bytes jedes 32-bit-Worts umdrehen – danach wie Byte für Byte lesen
+    const s2 = new Uint8Array(src.length);
+    for (let i = 0; i + 3 < src.length; i += 4) { s2[i] = src[i + 3]; s2[i + 1] = src[i + 2]; s2[i + 2] = src[i + 1]; s2[i + 3] = src[i]; }
+    src = s2;
+  }
+  const out = new Uint16Array(w * h);
+  const mask = (1 << bps) - 1;
+  for (let y = 0; y < h; y++) {
+    let p = y * rowBytes, acc = 0, have = 0;
+    for (let x = 0; x < w; x++) {
+      while (have < bps) { acc = ((acc << 8) | (src[p++] ?? 0)) & 0xffffff; have += 8; }
+      have -= bps;
+      out[y * w + x] = (acc >> have) & mask;
+    }
+  }
+  return out;
+}
+
+/** Bitleser über 32-bit-Wörter (Little Endian), im Wort höchstes Bit zuerst (Samsung). */
+function wordBits(data: Uint8Array, start: number): (n: number) => number {
+  let pos = start, word = 0, left = 0;
+  return (n: number) => {
+    let v = 0;
+    while (n > 0) {
+      if (!left) {
+        word = ((data[pos] ?? 0) | ((data[pos + 1] ?? 0) << 8) | ((data[pos + 2] ?? 0) << 16) | ((data[pos + 3] ?? 0) << 24)) >>> 0;
+        pos += 4;
+        left = 32;
+      }
+      const take = Math.min(n, left);
+      v = v * (1 << take) + ((word >>> (left - take)) & ((1 << take) - 1));
+      left -= take;
+      n -= take;
+    }
+    return v;
+  };
+}
+
+/**
+ * Sony ARW verlustbehaftet („cRAW“, Kompression 32767 mit 1 Byte je Pixel). Aufbau (Reverse Engineering, siehe
+ * THIRD_PARTY.md): Jede Zeile besteht aus Blöcken zu 16 Byte; ein Block enthält 16 Pixel derselben Farbe aus einem
+ * Abschnitt von 32 Spalten (abwechselnd die geraden, dann die ungeraden Spalten). Ein Block als 128-bit-Zahl
+ * (Little Endian, niedrigste Bits zuerst): Höchstwert und Tiefstwert (je 11 bit), deren Lage im Block (je 4 bit),
+ * dann für die übrigen 14 Pixel je 7 bit Abstand zum Tiefstwert – um so viele Bits (0–4) nach links geschoben, wie
+ * die Spanne Höchst − Tiefst über 7 bit hinausgeht. Die 11-bit-Werte laufen über die Kennlinie aus Tag 0x7010
+ * (vier Knickpunkte, dazwischen Steigung 1, 2, 4, 8, 16) in den 14-bit-Bereich (Schwarz 512 laut Tag 0x7310).
+ */
+export function sonyCurve(knots: number[]): Uint16Array {
+  const k = [0, 0, 0, 0, 0, 4095];
+  for (let i = 0; i < 4; i++) if (knots[i] !== undefined) k[i + 1] = (knots[i] >> 2) & 0xfff;
+  const curve = new Uint16Array(4096);
+  for (let i = 0; i < 5; i++) for (let j = k[i] + 1; j <= k[i + 1]; j++) curve[j] = Math.min(65535, curve[j - 1] + (1 << i));
+  return curve;
+}
+
+export async function decodeSonyLossy(b: Blob, t: Tags, w: number, h: number): Promise<Sensor> {
+  const curve = sonyCurve(t.get(0x7010) ?? []);
+  const off = t.get(0x111)![0];
+  const out = new Uint16Array(w * h);
+  const pix = new Uint16Array(16);
+  const CHUNK = 128; // Zeilen je Lesevorgang
+  for (let r0 = 0; r0 < h; r0 += CHUNK) {
+    const rows = Math.min(CHUNK, h - r0);
+    const buf = await bytes(b, off + r0 * w, rows * w + 2);
+    for (let rr = 0; rr < rows; rr++) {
+      const base = rr * w, dst = (r0 + rr) * w;
+      for (let blk = 0; (blk + 1) * 16 <= w; blk++) {
+        const dp = base + blk * 16;
+        const v = (buf[dp] | (buf[dp + 1] << 8) | (buf[dp + 2] << 16) | (buf[dp + 3] << 24)) >>> 0;
+        const max = v & 0x7ff, min = (v >>> 11) & 0x7ff, imax = (v >>> 22) & 15, imin = (v >>> 26) & 15;
+        let sh = 0;
+        while (sh < 4 && 0x80 << sh <= max - min) sh++;
+        for (let i = 0, bit = 30; i < 16; i++) {
+          if (i === imax) pix[i] = max;
+          else if (i === imin) pix[i] = min;
+          else {
+            const p = dp + (bit >> 3);
+            const x = ((((buf[p] | (buf[p + 1] << 8)) >> (bit & 7)) & 0x7f) << sh) + min;
+            pix[i] = x > 0x7ff ? 0x7ff : x;
+            bit += 7;
+          }
+        }
+        const col0 = (blk >> 1) * 32 + (blk & 1);
+        for (let i = 0; i < 16; i++) {
+          const col = col0 + 2 * i;
+          if (col < w) out[dst + col] = curve[pix[i] << 1];
+        }
+      }
+    }
+  }
+  return { w, h, data: out };
+}
+
+/**
+ * Samsung SRW, Kompression 32770 mit Zeilentabelle (NX300, NX2000, NX1000 …). Aufbau (Reverse Engineering, siehe
+ * THIRD_PARTY.md): Tag 0xa010 zeigt auf eine Tabelle mit dem Beginn jeder Zeile (32 bit, relativ zu den Daten).
+ * Je Zeile Blöcke zu 16 Pixeln: 1 bit Richtung (von oben oder von links vorhersagen), je Gruppe 2 bit Änderung der
+ * Bitlänge (gleich, +1, −1, neu mit 4 bit; Startlänge 7 in den ersten zwei Zeilen, sonst 4), dann die Differenzen mit
+ * Vorzeichen – erst die 8 geraden, dann die 8 ungeraden Positionen. Vorhersage von oben: 1 bzw. 2 Zeilen höher,
+ * von links: letzter Wert gleicher Parität des vorigen Blocks (am Zeilenanfang 128). Zum Schluss werden in jedem
+ * 2×2-Feld die Pixel oben rechts und unten links getauscht.
+ */
+export async function decodeSamsung1(b: Blob, t: Tags, w: number, h: number): Promise<Sensor> {
+  const dataOff = t.get(0x111)![0], dataLen = t.get(0x117)![0];
+  const tab = await bytes(b, t.get(0xa010)![0], h * 4);
+  const tv = new DataView(tab.buffer, tab.byteOffset, tab.byteLength);
+  const data = await bytes(b, dataOff, dataLen);
+  const out = new Int32Array(w * h);
+  const len = [0, 0, 0, 0];
+  for (let row = 0; row < h; row++) {
+    const bits = wordBits(data, tv.getUint32(row * 4, true));
+    len.fill(row < 2 ? 7 : 4);
+    const r = row * w;
+    for (let col = 0; col < w; col += 16) {
+      const dir = bits(1);
+      const op = [bits(2), bits(2), bits(2), bits(2)];
+      for (let c = 0; c < 4; c++) {
+        if (op[c] === 3) len[c] = bits(4);
+        else if (op[c] === 2) len[c]--;
+        else if (op[c] === 1) len[c]++;
+      }
+      for (let k = 0; k < 16; k++) {
+        const c = k < 8 ? 2 * k : 2 * (k - 8) + 1; // erst gerade, dann ungerade Positionen
+        const n = len[((c & 1) << 1) | (c >> 3)];
+        let d = n > 0 ? bits(n) : 0;
+        if (n > 0 && d >= 1 << (n - 1)) d -= 1 << n;
+        let pred: number;
+        if (dir) {
+          const up = row - (c & 1 ? 2 : 1);
+          pred = up >= 0 ? out[up * w + col + c] : 0;
+        } else pred = col ? out[r + col - (c & 1 ? 1 : 2)] : 128;
+        if (col + c < w) out[r + col + c] = pred + d;
+      }
+    }
+  }
+  const res = new Uint16Array(w * h);
+  for (let i = 0; i < res.length; i++) { const v = out[i]; res[i] = v < 0 ? 0 : v > 65535 ? 65535 : v; }
+  for (let row = 0; row + 1 < h; row += 2)
+    for (let col = 0; col + 1 < w; col += 2) {
+      const a = row * w + col + 1, c = (row + 1) * w + col;
+      const tmp = res[a]; res[a] = res[c]; res[c] = tmp;
+    }
+  return { w, h, data: res };
 }
 
 /** Unkomprimiert, 16 bit je Wert (oder 12/14 bit in 16-bit-Containern). */
@@ -386,7 +539,7 @@ async function decodeSamsung3(b: Blob, t: Tags, w: number, h: number, bps: numbe
 }
 
 /** Samsung-MakerNote (IFD, Verweise relativ zum Anfang der MakerNote): sichtbarer Bereich, Weissabgleich. */
-async function samsungInfo(b: Blob, ifds: Ifd[], le: boolean): Promise<{ crop?: { left: number; top: number; right: number; bottom: number }; wb?: [number, number, number] }> {
+async function samsungInfo(b: Blob, ifds: Ifd[], le: boolean): Promise<{ crop?: { left: number; top: number; right: number; bottom: number }; wb?: [number, number, number]; black?: number }> {
   const exifPtr = ifds[0]?.tags.get(0x8769)?.[0];
   if (!exifPtr) return {};
   const n = new DataView((await bytes(b, exifPtr, 2)).buffer).getUint16(0, le);
@@ -410,12 +563,13 @@ async function samsungInfo(b: Blob, ifds: Ifd[], le: boolean): Promise<{ crop?: 
     }
     return null;
   };
-  const out: { crop?: { left: number; top: number; right: number; bottom: number }; wb?: [number, number, number] } = {};
+  const out: { crop?: { left: number; top: number; right: number; bottom: number }; wb?: [number, number, number]; black?: number } = {};
   const area = await vals(0xa010); // Sensor gesamt (4 Werte), dann sichtbarer Bereich
   if (area?.length === 8 && area[6] > 0 && area[7] > 0) out.crop = { left: area[4], top: area[5], right: area[4] + area[6], bottom: area[5] + area[7] };
   const lv = await vals(0xa021), bk = await vals(0xa028); // Weissabgleich: Werte minus Schwarz, Reihenfolge R G G B
   if (lv?.length === 4) {
     const k = bk?.length === 4 ? bk : [0, 0, 0, 0];
+    if (bk?.length === 4) out.black = (bk[0] + bk[1] + bk[2] + bk[3]) / 4;
     const r = lv[0] - k[0], g = (lv[1] - k[1] + lv[2] - k[2]) / 2, bl = lv[3] - k[3];
     if (r > 0 && g > 0 && bl > 0) out.wb = [r / g, 1, bl / g];
   }
@@ -468,12 +622,21 @@ export interface DecodedRaw {
 //   0x111 sichtbare Grösse (Höhe, Breite), 0x131 X-Trans-Muster (36 Byte, rückwärts gelesen ab Sensorpunkt 0,0)
 // - Fuji-IFD: 0xf001/0xf002 Breite/Höhe, 0xf003 Bit, 0xf007/0xf008 Offset/Länge der Daten, 0xf00a Schwarzwerte,
 //   0xf00e (sonst 0xf00d) Weissabgleich G, R, B
-// Gelesen werden unkomprimierte Daten (16 bit je Wert). Die Fuji-Kompression ist nicht öffentlich beschrieben.
+// Gelesen werden unkomprimierte Daten: 16 bit je Wert oder dicht gepackt (z. B. 14 bit bei der X-A5, höchstes Bit
+// zuerst). Ohne X-Trans-Satz 0x131 hat die Kamera einen Bayer-Sensor; das Muster steht nicht in der Datei (siehe
+// RAF_BAYER). Die Fuji-Kompression ist nicht öffentlich beschrieben.
 
 const RAF_MAGIC = "FUJIFILMCCD-RAW";
 
+/**
+ * Bayer-Muster der Fujifilm-Kameras mit Bayer-Sensor ab Sensorpunkt (0,0), 0 R, 1 G, 2 B. Gegen das eingebettete
+ * Kamerabild bestimmt (X-A5: Farbkorrelation siehe docs/testdaten.md).
+ */
+const RAF_BAYER = [0, 1, 1, 2];
+
 interface RafRaw {
   sensor: Sensor;
+  /** X-Trans: 36 Werte; Bayer: 4 Werte */
   pattern: number[];
   crop: { left: number; top: number; right: number; bottom: number };
   black: number;
@@ -495,7 +658,7 @@ async function decodeRaf(b: Blob): Promise<RafRaw | "compressed" | null> {
   }
   const u16 = (tag: number, i: number) => { const r = rec.get(tag); return r && r.length >= 2 * i + 2 ? (r[2 * i] << 8) | r[2 * i + 1] : undefined; };
   const xt = rec.get(0x131);
-  if (!xt || xt.length !== 36) return null; // Bayer-RAF (ältere/andere Modelle): noch nicht
+  if (xt && xt.length !== 36) return null;
   const { le, ifds } = await readTiff(b, cfaOff);
   const fuji = ifds.find((i) => i.tags.has(0xf001));
   if (!fuji) return null;
@@ -503,18 +666,22 @@ async function decodeRaf(b: Blob): Promise<RafRaw | "compressed" | null> {
   const w = t.get(0xf001)![0], h = t.get(0xf002)![0], bps = t.get(0xf003)?.[0] ?? 14;
   const off = t.get(0xf007)?.[0], len = t.get(0xf008)?.[0];
   if (!w || !h || off === undefined || len === undefined) return null;
-  if (len < w * h * 2) return "compressed";
-  const raw = await bytes(b, cfaOff + off, w * h * 2);
-  const v = new DataView(raw.buffer);
-  const data = new Uint16Array(w * h);
-  for (let i = 0; i < data.length; i++) data[i] = v.getUint16(2 * i, le);
+  let data: Uint16Array;
+  if (len >= w * h * 2) {
+    const raw = await bytes(b, cfaOff + off, w * h * 2);
+    const v = new DataView(raw.buffer);
+    data = new Uint16Array(w * h);
+    for (let i = 0; i < data.length; i++) data[i] = v.getUint16(2 * i, le);
+  } else if (len * 8 === w * h * bps) {
+    data = unpackBits(await bytes(b, cfaOff + off, len), w, h, bps, (w * bps) / 8, true); // dicht gepackt
+  } else return "compressed";
   const top = u16(0x110, 0) ?? 0, left = u16(0x110, 1) ?? 0;
   const ch = u16(0x111, 0) ?? h - top, cw = u16(0x111, 1) ?? w - left;
   const bl = t.get(0xf00a);
   const g = t.get(0xf00e) ?? t.get(0xf00d); // G, R, B
   return {
     sensor: { w, h, data },
-    pattern: Array.from(xt).reverse().map((c) => c & 3),
+    pattern: xt ? Array.from(xt).reverse().map((c) => c & 3) : RAF_BAYER,
     crop: { left, top, right: left + cw, bottom: top + ch },
     black: bl?.length ? bl.reduce((a, c) => a + c, 0) / bl.length : 0,
     white: (1 << bps) - 1,
@@ -630,13 +797,6 @@ export async function rawUnsupported(b: Blob): Promise<"CR3" | "RAF" | null> {
  */
 export async function decodeRawData(b: Blob, wb?: [number, number, number]): Promise<DecodedRaw | null> {
   const head = await bytes(b, 0, 16);
-  if (String.fromCharCode(...head.subarray(0, 15)) === RAF_MAGIC) {
-    const r = await decodeRaf(b);
-    if (!r || r === "compressed") return null;
-    return finishXTrans(r.sensor, r.pattern, r.crop, r.black, r.white, wb, "RAF uncompressed", r.wb);
-  }
-  if (!((head[0] === 0x49 && head[1] === 0x49) || (head[0] === 0x4d && head[1] === 0x4d))) return null;
-  const { le, ifds } = await readTiff(b);
   let sensor: Sensor | null = null;
   let format = "";
   let cfa = [0, 1, 1, 2];
@@ -646,12 +806,25 @@ export async function decodeRawData(b: Blob, wb?: [number, number, number]): Pro
   let samsungBlack: number | undefined;
   let cameraWb: [number, number, number] | undefined;
   let nikonCrop: { left: number; top: number; right: number; bottom: number } | undefined;
+  if (String.fromCharCode(...head.subarray(0, 15)) === RAF_MAGIC) {
+    const r = await decodeRaf(b);
+    if (!r || r === "compressed") return null;
+    if (r.pattern.length === 36) return finishXTrans(r.sensor, r.pattern, r.crop, r.black, r.white, wb, "RAF uncompressed", r.wb);
+    // Bayer-RAF: weiter wie die übrigen Bayer-Formate
+    ({ sensor, crop, black, white } = r);
+    cfa = r.pattern;
+    cameraWb = r.wb;
+    format = "RAF uncompressed (Bayer)";
+  } else if (!((head[0] === 0x49 && head[1] === 0x49) || (head[0] === 0x4d && head[1] === 0x4d))) return null;
+  const { le, ifds } = sensor ? { le: true, ifds: [] as Ifd[] } : await readTiff(b);
 
   // Canon CR2: IFD mit Streifen-Angabe 0xc640
   const cr2 = ifds.find((i) => i.tags.has(0xc640));
   // Rohdaten-IFD: Farbmosaik (Photometric 32803) oder – wie bei Samsung – nur mit Farbmuster-Tag
-  const cfaIfd = ifds.find((i) => (i.tags.get(0x106)?.[0] === 32803 || (i.tags.has(0x828e) && i.tags.has(0x100))) && (i.tags.get(0xfe)?.[0] ?? 0) === 0);
-  if (cr2) {
+  const cfaIfd = sensor ? undefined : ifds.find((i) => (i.tags.get(0x106)?.[0] === 32803 || (i.tags.has(0x828e) && i.tags.has(0x100))) && (i.tags.get(0xfe)?.[0] ?? 0) === 0);
+  if (sensor) {
+    // Bayer-RAF: schon gelesen
+  } else if (cr2) {
     const t = cr2.tags;
     const lj = decodeLjpeg(await bytes(b, t.get(0x111)![0], t.get(0x117)![0]));
     sensor = unslice(lj, t.get(0xc640)!);
@@ -681,6 +854,37 @@ export async function decodeRawData(b: Blob, wb?: [number, number, number]): Pro
     } else if (comp === 1) {
       sensor = await decodeUncompressed(b, t, w, h, le);
       format = "uncompressed";
+    } else if (comp === 32767) {
+      // Sony: 1 Byte je Pixel = verlustbehaftet („cRAW“), 2 Byte = unkomprimiert
+      const total = (t.get(0x117) ?? []).reduce((a, c) => a + c, 0);
+      if (total === w * h) {
+        sensor = await decodeSonyLossy(b, t, w, h);
+        format = "ARW compressed";
+      } else if (total >= w * h * 2) {
+        sensor = await decodeUncompressed(b, t, w, h, le);
+        format = "ARW uncompressed";
+      } else return null;
+    } else if (comp === 32770 || comp === 32769) {
+      // Samsung: gepackt (NX100-Familie) oder mit Zeilentabelle komprimiert (NX300-Familie)
+      const total = t.get(0x117)?.[0] ?? 0;
+      if (total * 8 >= w * h * bps && (bps === 12 || bps === 14)) {
+        sensor = { w, h, data: unpackBits(await bytes(b, t.get(0x111)![0], total), w, h, bps, Math.floor(total / h)) };
+        format = "SRW packed";
+      } else if (t.has(0xa010)) {
+        sensor = await decodeSamsung1(b, t, w, h);
+        format = "SRW compressed";
+        // Das Farbmuster im Tag (RGGB) stimmt bei diesem Verfahren nicht: gegen das Kamerabild ist es GRBG
+        cfa = [1, 0, 2, 1];
+      } else return null;
+      const si = await samsungInfo(b, ifds, le);
+      // Sichtbarer Bereich: MakerNote, wenn er im Sensor liegt (NX100); bei der NX300-Familie reicht er darüber
+      // hinaus – dort gilt die gegen das Kamerabild gemessene Lage (5472 × 3648 ab links 52, oben 29)
+      if (si.crop && si.crop.right <= w && si.crop.bottom <= h) nikonCrop = si.crop;
+      else if (w === 5546 && h === 3714) nikonCrop = { left: 52, top: 29, right: 52 + 5472, bottom: 29 + 3648 };
+      // Schwarzwert 0: an NX100 und NX300 gegen das Kamerabild geprüft (Farbkorrelation 0.95 bzw. 0.65, Weissabgleich
+      // wie die Kamera); der Wert 0xa028 der MakerNote passt hier nicht zu den Rohdaten (rund 390)
+      samsungBlack = 0;
+      cameraWb = si.wb;
     } else if (comp === 34713) {
       const nk = await decodeNikon(b, ifds, le, t, w, h, bps);
       if (!nk) return null;
@@ -699,7 +903,7 @@ export async function decodeRawData(b: Blob, wb?: [number, number, number]): Pro
       const si = await samsungInfo(b, ifds, le);
       if (si.crop) nikonCrop = si.crop;
       cameraWb = si.wb;
-    } else return null; // Sony-Kompression, ältere Samsung-Verfahren: noch nicht
+    } else return null; // andere Verfahren (z. B. Samsung 32772): noch nicht
     if (!sensor) return null;
     // Schwarz und Weiss: DNG-Tags, sonst Sony 0x7310
     const bl = t.get(0xc61a) ?? t.get(0x7310);
