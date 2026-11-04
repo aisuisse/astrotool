@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rea": {
+      "command": "C:/Program Files/nodejs/node.exe",
+      "args": ["C:/Users/<USER>/tools/rea-agents/node_modules/rea-agents/scripts/rea.mjs", "mcp"]
+    }
+  }
+}

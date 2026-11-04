@@ -1,0 +1,63 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Astrotool",
+  "version": "0.25.0",
+  "identifier": "ch.aisuisse.astrotool",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Astrotool",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "aisuisse",
+    "category": "Utility",
+    "shortDescription": "Pre-processing for planets, Moon, Sun & eclipses",
+    "longDescription": "Astrotool prepares videos and image series of planets, the Moon, the Sun and solar eclipses for stacking: find the object, centre, crop, sort by sharpness, create time-lapses.",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "languages": [
+          "English",
+          "German"
+        ],
+        "displayLanguageSelector": true,
+        "installMode": "currentUser"
+      }
+    },
+    "license": "GPL-3.0-or-later",
+    "licenseFile": "../../LICENSE",
+    "copyright": "© 2026 aisuisse – GPL-3.0-or-later"
+  }
+}

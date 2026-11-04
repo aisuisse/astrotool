@@ -1,0 +1,97 @@
+# 03 – Roadmap
+
+## Grundsatz: Nachbau des Verhaltens, nicht des Codes
+
+PIPP ist Freeware ohne veröffentlichten Quellcode. Wir übernehmen **keinen** Code aus den Binärdateien. Die Analyse dient dazu, Funktionsumfang, Optionen und Dateiformate zu verstehen (Interoperabilität, z. B. `.pof`-Import). Die Algorithmen werden eigenständig aus offenen Quellen implementiert (SER-Spezifikation, FITS-Standard, Ninox-Quellcode, Fachliteratur zu Schwerpunkt-Zentrierung und Bildschärfe-Massen). Ergebnisse werden mit PIPP-Ausgaben verglichen, nicht mit PIPP-Code.
+
+## Stand und Priorität (November 2026)
+
+Seit 0.6 wird nur noch die Windows-App weiterentwickelt (dieselbe Oberfläche, läuft auch im Browser). Priorität: 1 = als Nächstes.
+
+| Schritt | Inhalt | Stand | Prio |
+|---|---|---|---|
+| 1.1 | SER lesen (8/16 bit, Mono/Bayer/RGB, Zeitstempel, Reparatur „0 Frames“) | ✅ | – |
+| 1.2 | Objekterkennung + Zentrieren + Zuschneiden | ✅ | – |
+| 1.3 | Qualitätsschätzung + Sortierung + „beste N / %“ | ✅ | – |
+| 1.4 | SER schreiben, PNG-Einzelbilder (ZIP oder Ordner) + Protokoll | ✅ | – |
+| 1.5 | Debayer (bilinear) in Verarbeitung und Betrachter | ✅ 0.8 | – |
+| 1.5b | Mono-Konvertierung, Spiegeln/Drehen | offen | 4 |
+| 1.6 | AVI-Eingabe (eigener Leser: grau 8/16 bit, BGR, MJPEG, OpenDML > 4 GB) ✅, MP4/MOV/MKV/WebM über WebCodecs ✅ – ohne FFmpeg | ✅ 0.10 | – |
+| 1.7 | JPG/PNG/TIFF lesen ✅, PNG schreiben ✅, Kamera-RAW ✅ 0.11 (Sensordaten DNG/CR2/ARW, sonst eingebettetes JPEG), 16-bit-PNG/TIFF und FITS schreiben ✅ 0.16 (eigene Encoder, `engine/imagewrite.ts`); FITS lesen ✅ 0.20 (`engine/fits.ts`: Einzelbilder grau/Bayer/Farbe, BITPIX 8/16/32/−32/−64, BZERO/BSCALE, ROWORDER, BAYERPAT mit Versatz, DATE-OBS/EXPTIME); FITS-Würfel ✅ 0.25 (`readFitsLayout`, `FitsCubeSource`): NAXIS3 = N Bilder (grau/Bayer), NAXIS3 = 3 Farben × NAXIS4 = N Bilder, ein Bild je Erweiterung (XTENSION = 'IMAGE', Tabellen übersprungen) – allein geöffnet wie ein SER-Video (Betrachter, Bildrate); Zeiten je Bildteil aus DATE-OBS, im Würfel gleichmässig bis DATE-END; Helligkeitsfaktor vom ersten Bild für alle; NAXIS3 = 3 ohne BAYERPAT gilt als Farbbild. Offen: BAYERPAT bei Dateien ohne ROWORDER und Würfel mit echten Kameradateien prüfen, Zeiten je Bild aus einer Tabelle | ✅ 0.20, Würfel 0.25 | – |
+| 1.7b | RAW-Sensordaten: Nikon-komprimierte NEF ✅ 0.12 (mit Weissabgleich der Kamera), Samsung SRW (NX500, Kompression 32773) ✅ 0.13; offen: Sony-komprimierte ARW, ältere Samsung-Verfahren, ältere/Bayer-RAF. Fujifilm X-Trans ✅ 0.21: RAF unkomprimiert und DNG mit 6×6-Muster, eigene Farbrekonstruktion (`demosaicXTrans`), Muster/Zuschnitt mit echter X-T4-Datei gegen das Kamerabild geprüft. CR3 („CRX“) und komprimierte RAF: keine öffentliche Formatbeschreibung, nur Code (LibRaw/rawspeed, LGPL) – bewusst nicht nachgebaut (Clean-Room, Zweitlizenz); Weg über den Adobe DNG Converter, Hinweis in der App | teilweise | 2 |
+| 1.8 | Dark/Flat-Kalibrierung ✅ 0.18 (`engine/calibrate.ts`): Master aus bis zu 256 Bildern (SER, Video, Bildserie, RAW), Mittel ohne Höchst- und Tiefstwert; Flat minus Flat-Dark/Bias, normiert je Bayer-Zelle bzw. Farbkanal; angewendet auf das ganze Rohbild vor Zuschnitt und Debayer, auch in Vorschau und Betrachter; offen: Dark-Skalierung bei anderer Belichtungszeit, Master speichern/laden | ✅ 0.18 | – |
+| 1.9 | Oberflächen-Stabilisierung (Sonne/Mond, Ausschnitte) ✅ 0.22 (`engine/surface.ts`): Mittelpunkt „Oberflächenstruktur“, Referenz = erstes Bild des Bereichs; Korrelation mit eigener FFT, Kreuzspektrum halb normiert, Bandpass, Tukey-Fenster; ganzes Bild verkleinert auf ≤ 256², bei grossen Bildern Feinstufe 256² in voller Auflösung; Unterpixel über feines Gitter aus dem Spektrum; Bilder unter 20 % Übereinstimmung verworfen. Ankerbox ✅ 0.24 (freiwillig, `surfaceAnchor`): in der Eingabe-Ansicht ein Rechteck um eine markante Stelle ziehen, nur dieser Bereich zählt; das Suchfenster folgt der zuletzt sicher gefundenen Verschiebung (Drift weit über die Boxgrösse); Box wird mit der gefundenen Verschiebung angezeigt, „Ankerbox löschen“ führt zum ganzen Bild zurück. Offen: Referenz nachführen (Struktur ändert sich über lange Zeit), Bilddrehung, Vorschau ohne Nachführung (ein einzelnes Bild weit weg von der Referenz kann dort scheitern, die Verarbeitung nicht) | ✅ 0.22, Anker 0.24 | – |
+| 1.10 | `.pof`-Import ✅, Vorlagen Planet/Sonne-Mond/Finsternis/Nur sortieren ✅ | ✅ | – |
+| 1.11 | Zeitraffer HEVC/H.264/WebM/GIF mit Aufnahmedatum ✅, WinJUPOS-Dateinamen | teilweise | 4 |
+| 1.12 | Sehr grosse Dateien: 3.7 GB getestet ✅; AVI > 4 GB lesen ✅ 0.10; Ausgabe direkt auf die Platte während der Verarbeitung (SER in eine Datei, Einzelbilder in einen Ordner) ✅ 0.17, ZIP64 ✅ 0.17 (`engine/sink.ts`), 4.6-GB-SER und 4.7-GB-ZIP geprüft; Export aus dem Betrachter direkt auf die Platte ✅ 0.19 | ✅ 0.17 | – |
+| 1.13 | Sonnenfinsternis-Modus: partielle Phasen ✅, Totalität mit Mondrand und HDR-Reihen ✅ 0.9, mit echter Serie (Megamovie 2024) geprüft ✅; Sonnenmitte statt Mondmitte in der Totalität ✅ 0.14, Himmelsschleier im HDR abgezogen ✅ 0.14, mit Verlauf bei hellem Himmel ✅ 0.23; Phasenmontage ✅ 0.15; dunkle/bewölkte Teilphasen sauber verworfen, Montage-Helligkeit angeglichen ✅ 0.15.1; offen: gekrümmter Himmelsverlauf, mehr echte Serien mit partiellen Phasen | teilweise | 3 (Echtdaten-Test vor 02.08.2027) |
+| 1.14 | Betrachter: Farbwiedergabe 30 Bilder/s | ✅ in der App (29.8 fps bei 640 × 640); im Browser-Fenster der Entwicklungsumgebung ~16 | – |
+
+### Sonnenfinsternis-Modus (neu, gibt es in PIPP nicht)
+
+- **Zentrieren in den partiellen Phasen:** Der Schwerpunkt einer Sichel liegt nicht in der Sonnenmitte. Deshalb wird ein Kreis an den äusseren Sonnenrand angepasst (robuste Kreisanpassung, die den Mondrand als Ausreisser verwirft). Der Radius ist über die ganze Serie fast konstant und stützt die Anpassung.
+- **Totalität (0.9, `web/src/engine/totality.ts`):** Keine Sonnenscheibe sichtbar → Ausrichtung am Mondrand. Der Mond ist ein dunkles, ringsum von Korona umschlossenes Loch; es wird bei mehreren Schwellen gesucht (kurze Belichtung: nur innere Korona, lange: grosse überbelichtete Fläche), ein Kreis angepasst und an der steilsten Helligkeitszunahme nach aussen verfeinert (720 Strahlen, Ausreisser wie Protuberanzen oder Blendung verworfen). Partielle Phasen haben kein solches Loch und bleiben beim Sonnenrand; bei ringförmiger Finsternis gewinnt der Sonnenrand, wenn es ausserhalb dunkel ist.
+  - **Belichtungsreihen:** aufeinanderfolgende Totalitäts-Bilder mit verschiedener Belichtung (EXIF: Zeit × ISO / Blende²) und kurzer Pause; wiederholt sich eine Belichtung, beginnt die nächste Reihe.
+  - **HDR:** jede Reihe subpixelgenau am Mondrand ausgerichtet, linear gewichtet zusammengeführt (überbelichtete und sehr dunkle Werte zählen nicht), logarithmisch abgebildet. Ergebnis: ein Bild je Reihe (`…_hdr_astro.png`), im Zeitraffer ohne Flackern. Das Protokoll enthält Rand (Sonne/Mond), Belichtung und Reihen-Nummer.
+  - **Sonnenmitte in der Totalität (0.14):** In den partiellen Phasen wird zusätzlich der Mondrand vor der Sonne gemessen (innere Kante der Sichel). Der Abstand Sonne–Mond ist unabhängig von der Nachführung und ändert sich gleichmässig; eine Gerade durch die nächsten Messungen vor und nach der Totalität ergibt die Lage der verdeckten Sonne. Künstliche, physikalisch stimmige Serie: 0.01–0.19 px Abstand zur wahren Sonnenmitte statt 1.6–5.5 px mit Mondmitte – kein Sprung am 2./3. Kontakt. Ohne brauchbare partielle Bilder (oder bei unplausiblem Ergebnis) bleibt es beim Mond. Schalter „Totalität: auf die verdeckte Sonne zentrieren“, Protokoll-Spalten `sun_x`, `sun_y`.
+  - **Himmelsschleier (0.14, Verlauf 0.23):** Das Streulicht der Atmosphäre liegt vor Mond und Korona; hinter dem Mond gibt es keine Korona. Im HDR wird im Mondinneren (75 % des Radius) je Farbe eine Ebene angepasst (robust, `fitSkyModel` in `engine/totality.ts`) und über das ganze Bild abgezogen – so verschwindet auch ein Verlauf (heller zur Sonne oder zum Horizont hin). Ein Anstieg zählt nur, wenn er mehr als dreimal so gross ist wie seine Unsicherheit; nach dem Abzug fallen höchstens 2 % des Bildes unter null. Der Aussenbereich wird bewusst nicht verwendet: dort überdecken Korona-Strahlen jeden Verlauf (ein Versuch mit Korona-Modell lag um ein Mehrfaches daneben). Die Tonwertkurve knickt frühestens beim doppelten Rauschen im Mond ab – sonst wird das Rauschen im dunklen Mond zu grobem Korn.
+  - **Grenzen:** Überbelichtung lässt den Mondrand etwas kleiner erscheinen; die Mitte bleibt genau. Ein heller Himmel wird nur als Ebene abgezogen: ein gekrümmter Verlauf bleibt teilweise stehen (echte Serie 5883–84: Unterschied links/rechts etwa halbiert), ebenso Streulicht, das rund um die Sonne liegt (nicht von der Korona zu trennen).
+  - **Geprüft** mit künstlichen Serien (`web/scripts/totality-model.mjs`, `make-totality-testset.mjs`): Mondmitte auf < 0.4 px bei allen Belichtungen, Reihen richtig getrennt, HDR ohne Überbelichtung. Die echten Bilder vom 12.08.2026 (nur partiell) werden weiterhin am Sonnenrand zentriert. Echte Serie: NASA Eclipse Megamovie 2024 (17 Bilder am Mondrand, Randabweichung < 0.9 px, 4 HDR-Reihen), siehe [Testdaten](../testdaten.md).
+- **Zeit:** Aufnahmezeiten aus SER-Zeitstempeln, FITS-Header oder EXIF übernehmen, in UT umrechnen, in Dateinamen schreiben.
+- **Ausgabe:** ausgerichtete Einzelbilder (PNG 8/16 bit, TIFF 16 bit, FITS 16 bit mit BZERO, DATE-OBS, EXPTIME, BAYERPAT, ROWORDER = TOP-DOWN – 0.16), Zeitraffer (MP4/WebM/GIF), Phasenmontage (0.15, `engine/montage.ts`, `montage-render.ts`): Auswahl gleichmässig je halb nach Zeit und Bildnummer (Lücken in der Serie ergeben keine Doppelten), Totalität bzw. deren HDR-Bild in der Mitte; Anordnung Bogen/Reihe/Raster; Himmel je Ausschnitt abgezogen und Rand weich ausgeblendet, Überlagerung „Aufhellen“.
+
+Technik: Vite + TypeScript, Verarbeitung im Web Worker, Engine als reines TypeScript-Modul (`web/src/engine`) ohne DOM-Abhängigkeit – dadurch später wiederverwendbar.
+
+## Phase 2 – Windows-App (ab Windows 11, 2026)
+
+Empfehlung: **Tauri 2** – dieselbe Web-Oberfläche als native Windows-App (WebView2 ist in Windows 11 eingebaut), rechenintensive Teile als Rust-Code. Vorteile: echte Dateipfade, Batch-Verarbeitung ganzer Ordner, keine Grössenbeschränkung, modernes FFmpeg (FFV1, H.264/H.265, AV1) als Sidecar, signierbares MSIX-/MSI-Paket, Hi-DPI und Dark Mode.
+
+## Offene Analyse-Aufgaben (benötigen Ghidra)
+
+rea kann native Funktionen nur mit einem Decompiler-Backend (Ghidra, IDA, Hopper) untersuchen. Ghidra ist frei, benötigt ein JDK 21.
+
+1. Planetenerkennung: wie wird die Schwelle bei `AUTO_THRESHOLD` berechnet, wie wird „Rand im Schatten“ (`-shdw=`) behandelt?
+2. Standard-Qualitätsmass: genaue Formel des Downsampling-Verfahrens (`qmin/qmax/qinc`).
+3. Oberflächen-Stabilisierung: Suchfenster, Korrelationsmass, Subpixel-Genauigkeit.
+4. Debayer „Smooth Hue“ und Bayer-Mustererkennung.
+
+Ziel jeweils: Verhalten beschreiben und mit Testdaten bestätigen – danach eigenständig implementieren.
+
+## SER Player integrieren – erledigt in 0.7 (Betrachter-Modus)
+
+Vorlage: [cgarry/ser-player](https://github.com/cgarry/ser-player) (vom PIPP-Autor, seit Jahren nicht weiterentwickelt). Ziel: dessen Funktionen als eigener Betrachter in Astrotool – SER Bild für Bild abspielen, Bildrate, Zeitstempel, Header-Infos, Histogramm, Debayer-Vorschau, Bereich markieren und als neues SER/Bilder speichern.
+Entscheidung 02.11.2026: Astrotool steht unter GPL-3.0-or-later. SER Player wird trotzdem **eigenständig nachgebaut** (kein Code übernommen), damit der Urheber unabhängig bleibt – z. B. für eine spätere Zweitlizenz. Originalcode nur nach ausdrücklicher Rückfrage und gekennzeichnet.
+
+Umgesetzt (eigener Code, `web/src/player.ts`, `engine/debayer.ts`, `engine/display.ts`): Abspielen vorwärts/rückwärts/vor & zurück mit Endlos und Bildrate, Bild für Bild, Start-/Endmarker mit Tastatur, Debayer (alle vier Muster), Verstärkung, Gamma, Sättigung, automatische Farbbalance (nur helles Objekt), Histogramm je Kanal, Zoom bis 400 %, Bereich speichern (SER original, SER wie angezeigt, PNG), Bereich an die Verarbeitung übergeben, Reparatur „0 Frames“.
+
+Wiedergabe von Farb-SER: in der Windows-App 29.8 Bilder/s (Volltest 03.11.2026), damit erledigt. Offen: zuletzt geöffnete Dateien (nur in der App möglich).
+
+## Checkliste vor dem Veröffentlichen des Repos
+
+Stand 04.11.2026 (0.25.0).
+
+- [ ] Git-Verlauf zu einem frischen ersten Commit zusammenfassen – ältere Commits enthalten persönliche Pfade und eine frühere Fassung von `docs/images/tools.jpg` mit dem Benutzernamen im Bild
+- [x] Heutiger Stand ohne persönliche Daten (04.11.2026): alle 127 Dateien nach Benutzername, Benutzerpfaden und E-Mail-Adressen durchsucht; Bilder ohne EXIF/GPS/XMP; Benutzerpfad in `tools.jpg` überdeckt, `app-showcase.mjs` ersetzt ihn künftig vor dem Bildschirmfoto durch `<user>`; Pfad in `SHOWCASE.md` entfernt
+- [x] Entschieden (04.11.2026): `docs/vergleich-sofi-2026` wird **nicht** veröffentlicht – beim Veröffentlichen aus dem Repo nehmen (siehe Ablauf unten); das Genauigkeitsbild `docs/images/accuracy-pipp-vs-astrotool.jpg` bleibt
+- [x] Entschieden (04.11.2026): `docs/showcase/` bleibt privat (Übergabe-Notizen, Megamovie-Bilder ohne Lizenzangabe) – beim Veröffentlichen aus dem Repo nehmen
+- [x] CLA-Hinweis für Beiträge (CONTRIBUTING.md, englisch) – CLA-Text selbst noch offen
+- [ ] CLA-Text festlegen – Entwurf 0.1 in `CLA.md` (04.11.2026, eigener Text, englisch): Urheberrecht bleibt bei Mitwirkenden, Lizenz an aisuisse für GPL und andere Bedingungen, Patentlizenz, Zusicherungen (kein PIPP-/SER-Player-Code), Zustimmung per Kommentar im ersten Pull Request. Offen: juristische Prüfung, Zusage „bleibt auch unter GPL“ (Abschnitt 6) behalten?, Aufzeichnung von Hand oder per CLA-Bot, anwendbares Recht
+- [x] Englische Texte für GitHub: README.md (Deutsch in README.de.md), Beschreibung, Themen; Release-Notes in docs/github/ABOUT.md auf 0.25.0 nachgeführt (04.11.2026)
+- [x] Lizenzen der Abhängigkeiten geprüft (04.11.2026): npm (Tauri-API MIT/Apache, mediabunny MPL-2.0, gifenc MIT), alle 406 Rust-Crates im Cargo.lock MIT/Apache/BSD/ISC/Zlib/Unicode/MPL – alles mit GPL-3.0 vereinbar; `THIRD_PARTY.md` nachgeführt
+- [x] Code-Signatur: entschieden (04.11.2026), die erste Version erscheint **unsigniert**; SmartScreen-Hinweis in README, Release-Notes und LIESMICH. Signatur später nachrüsten
+- [x] Vollständiger Testdurchgang der .exe – zuletzt 0.25.0, 40/40, 04.11.2026, `scripts/app-fulltest.mjs`
+- [ ] Installer einmal auf einem frischen Windows-Benutzerkonto durchspielen – Anleitung in [windows-app.md](../windows-app.md#installer-test-auf-einem-frischen-windows-konto-von-hand)
+- [ ] Bildschirmfotos in README/Showcase neu aufnehmen (zeigen noch 0.11: ohne Vorlage „Oberfläche“, ohne Kalibrierung)
+
+### Ablauf beim Veröffentlichen
+
+Erst wenn alle Punkte oben erledigt sind und der Eigentümer das Veröffentlichen ausdrücklich freigibt. Schritte 4–6 lassen sich nicht rückgängig machen.
+
+1. **Letzter Stand:** Version festlegen, `npm test`, Volltest (`scripts/app-fulltest.mjs`, alle Optionen), Paket in `Astrotool-App\<version>\`.
+2. **Private Ordner herausnehmen:** `docs/showcase/` und `docs/vergleich-sofi-2026/` nach `Astrotool-App\portfolio\` kopieren (Kopie prüfen), dann mit `git rm -r` aus dem Repo nehmen. Den Link auf `vergleich-sofi-2026` in `docs/testdaten.md` (Zeile „Eigene Aufnahmen 12.08.2026“) und diesen Checklisten-Text anpassen; danach darf `git grep -n "vergleich-sofi\|docs/showcase"` nichts mehr finden.
+3. **Nochmals prüfen:** `git grep -n -i -E "<benutzername>|C:/Users/|C:\\\\Users\\\\[a-z]"` findet nur `<USER>`-Platzhalter; Bilder ohne Benutzernamen; `THIRD_PARTY.md` aktuell.
+4. **Alten Verlauf sichern:** `git bundle create ..\..\Astrotool-App\astrotool-verlauf-<datum>.bundle --all` (enthält den ganzen bisherigen Verlauf, bleibt lokal und privat).
+5. **Frischer erster Commit:** `git checkout --orphan public`, `git add -A`, `git commit` („Astrotool <version>“, Autor = noreply-Adresse), dann `main` durch `public` ersetzen und mit `git push --force origin main` hochladen. Danach auf GitHub prüfen, dass keine alten Commits, Branches oder Tags mehr sichtbar sind.
+6. **Öffentlich schalten** (nur der Eigentümer, GitHub → Settings → Danger Zone → Change visibility).
+7. **Release anlegen:** Tag `v<version>`, Installer und portable .exe hochladen, Text aus `docs/github/ABOUT.md`; Website-Feld und Social-Preview-Bild setzen.
+8. **Nachkontrolle:** Release-Seite aus einem anderen Browser öffnen, Installer herunterladen und starten (SmartScreen-Hinweis wie beschrieben), Links in README prüfen.

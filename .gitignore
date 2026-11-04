@@ -1,0 +1,13 @@
+node_modules/
+dist/
+re/evidence/
+.mcp.json
+*.ser
+*.avi
+*.log
+.DS_Store
+web/.testdata/
+
+# privat, nicht veröffentlichen (Portfolio-Unterlagen, eigene Finsternis-Vergleiche)
+docs/showcase/
+docs/vergleich-sofi-2026/

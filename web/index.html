@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Astrotool</title>
+    <meta name="description" content="Prepare videos and image series of planets, the Moon, the Sun and solar eclipses for stacking: find the object, centre, crop, sort by sharpness – right in your browser." />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="9" /><ellipse cx="16" cy="16" rx="15" ry="4.5" transform="rotate(-20 16 16)" /></svg>
+        <span>Astrotool</span>
+        <small data-i18n="app.tagline">Pre-processing for planets, Moon, Sun &amp; eclipses</small>
+      </div>
+      <div class="actions">
+        <label class="btn primary">
+          <span data-i18n="btn.open">Open</span>
+          <input id="file" type="file" accept=".ser,.avi,.mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden />
+        </label>
+        <label class="btn">
+          <span data-i18n="btn.importPof">Import PIPP options</span>
+          <input id="pof" type="file" accept=".pof" hidden />
+        </label>
+        <button id="toolsBtn" class="btn" data-i18n="btn.tools">Tools &amp; setup</button>
+        <button id="lang" class="btn" lang="de" title="Sprache: Deutsch" data-i18n="btn.lang" data-i18n-title="btn.langTitle">Deutsch</button>
+        <button id="aboutBtn" class="btn icon" title="About Astrotool" data-i18n-title="btn.about" aria-label="About Astrotool">ⓘ</button>
+        <button id="night" class="btn icon" title="Night mode (red light)" data-i18n-title="btn.night" aria-pressed="false">☾</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="stage">
+        <div id="drop" class="drop">
+          <div>
+            <strong data-i18n="drop.title">Drop an SER video or image series here</strong>
+            <p data-i18n-html="drop.text">One SER video or several images (JPG, PNG, TIFF) – e.g. all shots of a solar eclipse.<br />Your files stay on your computer; everything runs in the browser.</p>
+          </div>
+        </div>
+
+        <div id="modeTabs" class="seg modeTabs" role="tablist" hidden>
+          <button data-mode="process" class="on" data-i18n="mode.process">Process</button>
+          <button data-mode="view" data-i18n="mode.view">View (SER Player)</button>
+        </div>
+
+        <section id="player" class="viewer" hidden>
+          <div id="playStage" class="view main playStage"><canvas id="playCanvas"></canvas></div>
+          <div class="playBar">
+            <input id="playFrame" type="range" min="0" value="0" aria-label="Frame" />
+            <div id="markerBar" class="markerBar"><span id="markerRange"></span></div>
+          </div>
+          <div class="transport">
+            <button id="pStart" class="btn icon" title="Start marker" data-i18n-title="play.toStart">⏮</button>
+            <button id="pBack" class="btn icon" title="Previous frame" data-i18n-title="btn.prev">‹</button>
+            <button id="pPlay" class="btn primary icon wide" title="Play / pause (Space)" data-i18n-title="play.playPause">▶</button>
+            <button id="pFwd" class="btn icon" title="Next frame" data-i18n-title="btn.next">›</button>
+            <button id="pEnd" class="btn icon" title="End marker" data-i18n-title="play.toEnd">⏭</button>
+            <select id="pDir" aria-label="Direction">
+              <option value="fwd" data-i18n="play.fwd">Forward</option>
+              <option value="rev" data-i18n="play.rev">Reverse</option>
+              <option value="pingpong" data-i18n="play.pingpong">Forward &amp; back</option>
+            </select>
+            <label class="inline"><input id="pFps" type="number" min="1" max="200" value="30" /> fps</label>
+            <label class="inline"><input id="pLoop" type="checkbox" checked /> <span data-i18n="play.loop">Loop</span></label>
+            <span class="spacer"></span>
+            <button id="pMarkIn" class="btn" title="Set start marker (I)" data-i18n-title="play.markInTitle">[ <span data-i18n="play.markIn">Start</span></button>
+            <button id="pMarkOut" class="btn" title="Set end marker (O)" data-i18n-title="play.markOutTitle"><span data-i18n="play.markOut">End</span> ]</button>
+            <button id="pMarkClear" class="btn" data-i18n="play.markClear">Clear</button>
+            <select id="pZoom" aria-label="Zoom">
+              <option value="fit" data-i18n="play.zoomFit">Fit</option>
+              <option value="1">100 %</option>
+              <option value="2">200 %</option>
+              <option value="4">400 %</option>
+            </select>
+          </div>
+          <dl id="playDetails" class="info"></dl>
+        </section>
+
+        <div id="viewer" class="viewer" hidden>
+          <div class="views">
+            <figure class="view main">
+              <canvas id="inCanvas"></canvas>
+              <figcaption><span id="inLabel" data-i18n="view.input">Input</span> <span class="legend obj" data-i18n="legend.object">Object</span> <span class="legend disc" data-i18n="legend.limb">Solar limb</span> <span class="legend crop" data-i18n="legend.crop">Crop</span> <span class="legend anchor" id="anchorLegend" data-i18n="legend.anchor" hidden>Anchor box</span></figcaption>
+            </figure>
+            <figure class="view">
+              <canvas id="outCanvas"></canvas>
+              <figcaption><span data-i18n="view.result">Result</span> <span id="verdict" class="pill"></span></figcaption>
+            </figure>
+          </div>
+          <div class="scrub">
+            <button id="prev" class="btn icon" title="Previous frame" data-i18n-title="btn.prev">‹</button>
+            <input id="frame" type="range" min="0" value="0" />
+            <button id="next" class="btn icon" title="Next frame" data-i18n-title="btn.next">›</button>
+            <span id="frameLabel" class="mono"></span>
+          </div>
+          <dl id="info" class="info"></dl>
+        </div>
+      </section>
+
+      <aside id="playerPanel" class="panel" hidden>
+        <section class="card">
+          <h2 data-i18n="play.display">Display</h2>
+          <div class="grid">
+            <label class="wide"><span data-i18n="play.debayer">Colour (debayer)</span>
+              <select id="dDebayer">
+                <option value="auto" data-i18n="play.debayerAuto">automatic (from file)</option>
+                <option value="off" data-i18n="play.debayerOff">off (raw, grey)</option>
+                <option value="RGGB">RGGB</option><option value="GRBG">GRBG</option><option value="GBRG">GBRG</option><option value="BGGR">BGGR</option>
+              </select>
+            </label>
+            <label class="wide"><span><span data-i18n="play.gain">Gain</span> <span id="dGainV" class="unit"></span></span><input id="dGain" type="range" min="0" max="300" value="100" /></label>
+            <label class="wide"><span><span data-i18n="play.gamma">Gamma</span> <span id="dGammaV" class="unit"></span></span><input id="dGamma" type="range" min="20" max="300" value="100" /></label>
+            <label class="wide"><span><span data-i18n="play.saturation">Saturation</span> <span id="dSatV" class="unit"></span></span><input id="dSat" type="range" min="0" max="300" value="100" /></label>
+            <label class="wide"><input id="dAutoBal" type="checkbox" checked /> <span data-i18n="play.autoBalance">Automatic colour balance</span></label>
+            <label><span><span data-i18n="play.red">Red</span> <span id="dRV" class="unit"></span></span><input id="dR" type="range" min="25" max="400" value="100" /></label>
+            <label><span><span data-i18n="play.blue">Blue</span> <span id="dBV" class="unit"></span></span><input id="dB" type="range" min="25" max="400" value="100" /></label>
+            <button id="dReset" class="btn wide" data-i18n="play.reset">Reset display</button>
+          </div>
+        </section>
+        <section class="card">
+          <h2 data-i18n="play.histogram">Histogram</h2>
+          <canvas id="histo" class="histo"></canvas>
+        </section>
+        <section class="card">
+          <h2 data-i18n="play.saveRange">Save range</h2>
+          <p id="rangeText" class="muted"></p>
+          <div class="grid">
+            <label class="wide"><span data-i18n="opt.format">Format</span>
+              <select id="exFormat">
+                <option value="ser-raw" data-i18n="play.exSerRaw">SER – original data (lossless)</option>
+                <option value="ser-processed" data-i18n="play.exSerProc">SER – as displayed (colour, gain, gamma)</option>
+                <option value="png" data-i18n="play.exPng">PNG images – as displayed (ZIP)</option>
+              </select>
+            </label>
+            <label class="wide" id="exDiskRow"><input type="checkbox" id="exToDisk" /> <span data-i18n="play.exToDisk">Write straight to disk (choose file or folder first – no size limit)</span></label>
+          </div>
+          <button id="exRun" class="btn primary big" data-i18n="play.exRun">Save range</button>
+          <button id="useRange" class="btn" data-i18n="play.useRange">Use range for processing</button>
+          <div id="exResult" class="result" hidden></div>
+        </section>
+      </aside>
+
+      <aside id="processPanel" class="panel">
+        <section class="card">
+          <h2 data-i18n="card.preset">Preset</h2>
+          <div class="seg" role="radiogroup">
+            <button data-preset="planet" class="on" data-i18n="preset.planet">Planet</button>
+            <button data-preset="disc" data-i18n="preset.disc">Sun / Moon</button>
+            <button data-preset="eclipse" data-i18n="preset.eclipse">Eclipse</button>
+            <button data-preset="surface" data-i18n="preset.surface">Surface</button>
+            <button data-preset="quality" data-i18n="preset.quality">Sort only</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><label><input type="checkbox" data-opt="checkObject" /> <span data-i18n="card.check">Check object</span></label></h2>
+          <div class="grid">
+            <label><span><span data-i18n="opt.minSize">Minimum size</span> <span class="unit">px</span></span><input type="number" data-opt="minObjectSize" min="1" /></label>
+            <label><span><span data-i18n="opt.threshold">Threshold</span> <span class="unit">0–255</span></span><input type="number" data-opt="thresholdManual" min="1" max="254" placeholder="auto" /></label>
+            <label class="wide"><input type="checkbox" data-opt="rejectEdgeTouching" /> <span data-i18n="opt.rejectEdge">Reject frames where the object touches the edge</span></label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><label><input type="checkbox" data-opt="centre" /> <span data-i18n="card.centre">Centre</span></label></h2>
+          <div class="grid">
+            <label class="wide"><span data-i18n="opt.centreMode">Centre point</span>
+              <select data-opt="centreMode">
+                <option value="object" data-i18n="opt.centreMode.object">Centroid of the bright area (like PIPP)</option>
+                <option value="disc" data-i18n="opt.centreMode.disc">Circle fitted to solar/lunar limb (eclipse, lunar phases)</option>
+                <option value="surface" data-i18n="opt.centreMode.surface">Surface structure (lunar/solar close-up without full limb)</option>
+              </select>
+            </label>
+            <div id="anchorRow" class="wide anchorRow" hidden>
+              <span id="anchorText"></span>
+              <button type="button" id="anchorClear" data-i18n="opt.anchorClear">Remove anchor box</button>
+            </div>
+            <label class="wide"><input type="checkbox" data-opt="totalitySunCentre" /> <span data-i18n="opt.totalitySunCentre">Totality: centre on the hidden sun (estimated from the partial phases) instead of the moon</span></label>
+            <label class="wide"><input type="checkbox" data-opt="hdr" /> <span data-i18n="opt.hdr">Totality: merge exposure brackets into one HDR image (aligned on the lunar limb)</span></label>
+            <label class="wide"><input type="checkbox" data-opt="cropEnabled" /> <span data-i18n="opt.crop">Crop</span></label>
+            <label><span data-i18n="opt.width">Width</span><input type="number" data-opt="cropWidth" min="8" step="2" /></label>
+            <label><span data-i18n="opt.height">Height</span><input type="number" data-opt="cropHeight" min="8" step="2" /></label>
+            <label><span data-i18n="opt.offsetX">Offset X</span><input type="number" data-opt="offsetX" /></label>
+            <label><span data-i18n="opt.offsetY">Offset Y</span><input type="number" data-opt="offsetY" /></label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><label><input type="checkbox" data-opt="qualityEnabled" /> <span data-i18n="card.quality">Sort by quality</span></label></h2>
+          <div class="grid">
+            <label class="wide"><span data-i18n="opt.method">Method</span>
+              <select data-opt="method">
+                <option value="gradient" data-i18n="opt.method.gradient">Sharpness (gradient, multi-scale)</option>
+                <option value="histogram" data-i18n="opt.method.histogram">Brightest pixel</option>
+                <option value="brightness" data-i18n="opt.method.brightness">Total brightness</option>
+              </select>
+            </label>
+            <label><span data-i18n="opt.keep">Keep</span>
+              <select data-opt="keepMode">
+                <option value="all" data-i18n="opt.keep.all">all</option>
+                <option value="count" data-i18n="opt.keep.count">best N</option>
+                <option value="percent" data-i18n="opt.keep.percent">best %</option>
+              </select>
+            </label>
+            <label><span data-i18n="opt.keepValue">Count / %</span><input type="number" data-opt="keepValue" min="1" /></label>
+            <label class="wide"><input type="checkbox" data-opt="reorder" /> <span data-i18n="opt.reorder">Save best frames first</span></label>
+          </div>
+        </section>
+
+        <section class="card" id="calCard">
+          <h2 data-i18n="card.cal">Calibration (dark / flat)</h2>
+          <div class="cal">
+            <div class="calRow" data-cal="dark">
+              <label class="btn"><span data-i18n="cal.dark">Darks …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              <label><input type="checkbox" data-cal-use="dark" disabled /> <span data-i18n="cal.apply">apply</span></label>
+              <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
+              <small class="calInfo"></small>
+            </div>
+            <div class="calRow" data-cal="flat">
+              <label class="btn"><span data-i18n="cal.flat">Flats …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              <label><input type="checkbox" data-cal-use="flat" disabled /> <span data-i18n="cal.apply">apply</span></label>
+              <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
+              <small class="calInfo"></small>
+            </div>
+            <div class="calRow" data-cal="flatDark">
+              <label class="btn"><span data-i18n="cal.flatDark">Flat darks / bias …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              
+              <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
+              <small class="calInfo"></small>
+            </div>
+          </div>
+          <small class="unit" data-i18n="cal.hint">Same camera, gain and size as the recording. Darks: same exposure and temperature, lens covered. Flats: evenly lit, same focus. Several frames each are combined into a master.</small>
+        </section>
+
+        <section class="card">
+          <h2 data-i18n="card.range">Range</h2>
+          <div class="grid">
+            <label><span data-i18n="opt.startFrame">Start frame</span><input type="number" data-opt="startFrame" min="0" /></label>
+            <label><span><span data-i18n="opt.maxFrames">Max. frames</span> <span class="unit" data-i18n="unit.zeroAll">0 = all</span></span><input type="number" data-opt="maxFrames" min="0" /></label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 data-i18n="card.output">Output</h2>
+          <div class="grid">
+            <label class="wide"><span data-i18n="opt.format">Format</span>
+              <select id="format">
+                <option value="ser" data-i18n="opt.format.ser">SER video (for AutoStakkert!, RegiStax …)</option>
+                <option value="png" data-i18n="opt.format.png">PNG images + log</option>
+                <option value="png16" data-i18n="opt.format.png16">PNG 16 bit + log (full depth)</option>
+                <option value="tiff" data-i18n="opt.format.tiff">TIFF 16 bit + log (for Photoshop, Affinity …)</option>
+                <option value="fits" data-i18n="opt.format.fits">FITS + log (for Siril, PixInsight, DeepSkyStacker)</option>
+                <option value="none" data-i18n="opt.format.none">no single frames (time-lapse only)</option>
+              </select>
+            </label>
+            <label class="wide rawRow" hidden><span data-i18n="opt.rawMode">RAW photos</span>
+              <select id="rawMode">
+                <option value="raw" data-i18n="opt.rawMode.raw">Sensor data (16 bit, linear – best for HDR and stacking)</option>
+                <option value="preview" data-i18n="opt.rawMode.preview">Camera image (embedded JPEG, as on the camera display)</option>
+              </select>
+            </label>
+            <label class="wide colourRow"><span data-i18n="opt.debayer">Colour camera (debayer)</span>
+              <select data-opt="debayer">
+                <option value="auto" data-i18n="opt.debayer.auto">automatic (pattern from file)</option>
+                <option value="off" data-i18n="opt.debayer.off">off (keep raw data, grey)</option>
+                <option value="RGGB">RGGB</option><option value="GRBG">GRBG</option><option value="GBRG">GBRG</option><option value="BGGR">BGGR</option>
+              </select>
+            </label>
+            <label class="wide colourRow"><input type="checkbox" data-opt="debayerSer" /> <span data-i18n="opt.debayerSer">Save SER video in colour too (off: raw Bayer data for AutoStakkert!)</span></label>
+            <label class="wide" id="folderRow"><input type="checkbox" id="toFolder" /> <span id="toFolderLabel" data-i18n="opt.toFolder">Write single frames straight into a folder (instead of ZIP)</span></label>
+          </div>
+        </section>
+
+        <section class="card" id="tlCard">
+          <h2><label><input type="checkbox" data-tl="enabled" /> <span data-i18n="card.timelapse">Create time-lapse</span></label></h2>
+          <div class="grid">
+            <label class="wide"><span data-i18n="opt.format">Format</span>
+              <select data-tl="format">
+                <option value="mp4-hevc" data-i18n="tl.hevc">MP4 · H.265/HEVC – best quality, small file (WhatsApp, Google Photos)</option>
+                <option value="mp4-h264" data-i18n="tl.h264">MP4 · H.264 – maximum compatibility</option>
+                <option value="webm" data-i18n="tl.webm">WebM (VP9) – for websites</option>
+                <option value="gif" data-i18n="tl.gif">GIF (animated)</option>
+              </select>
+            </label>
+            <label><span data-i18n="tl.fps">Frames / s</span><input type="number" data-tl="fps" min="1" max="60" /></label>
+            <label><span><span data-i18n="tl.hold">Hold last frame</span> <span class="unit">s</span></span><input type="number" data-tl="holdLastSeconds" min="0" max="30" step="0.5" /></label>
+            <label><span><span data-i18n="opt.width">Width</span> <span class="unit" data-i18n="unit.zeroFull">0 = full</span></span><input type="number" data-tl="width" min="0" step="2" /></label>
+            <label class="wide"><input type="checkbox" data-tl="pingPong" /> <span data-i18n="tl.pingPong">Forward and back</span></label>
+            <label class="wide"><input type="checkbox" data-tl="showTime" /> <span data-i18n="tl.showTime">Show capture time</span></label>
+            <label class="wide"><span data-i18n="tl.title">Title</span><input type="text" data-tl="title" placeholder="e.g. Partial solar eclipse 12 Aug 2026" data-i18n-placeholder="tl.titlePlaceholder" maxlength="80" /></label>
+          </div>
+        </section>
+
+        <section class="card" id="mtCard">
+          <h2><label><input type="checkbox" data-mt="enabled" /> <span data-i18n="card.montage">Phase montage</span></label></h2>
+          <div class="grid">
+            <label class="wide"><span data-i18n="mt.layout">Layout</span>
+              <select data-mt="layout">
+                <option value="arc" data-i18n="mt.layout.arc">Arc (path of the sun)</option>
+                <option value="row" data-i18n="mt.layout.row">Row</option>
+                <option value="grid" data-i18n="mt.layout.grid">Grid</option>
+              </select>
+            </label>
+            <label><span data-i18n="mt.count">Images</span><input type="number" data-mt="count" min="2" max="40" /></label>
+            <label><span><span data-i18n="opt.width">Width</span> <span class="unit">px</span></span><input type="number" data-mt="width" min="800" max="8000" step="10" /></label>
+            <label class="wide"><input type="checkbox" data-mt="showTime" /> <span data-i18n="mt.showTime">Time under each image</span></label>
+            <label class="wide"><span data-i18n="tl.title">Title</span><input type="text" data-mt="title" maxlength="100" /></label>
+          </div>
+        </section>
+
+        <section class="card run">
+          <button id="run" class="btn primary big" disabled>Process</button>
+          <button id="cancel" class="btn" hidden data-i18n="btn.cancel">Cancel</button>
+          <div class="progress" hidden><div id="bar"></div><span id="progressLabel"></span></div>
+          <div id="result" class="result" hidden></div>
+          <p id="error" class="error" role="alert" hidden></p>
+        </section>
+      </aside>
+    </main>
+    <dialog id="toolsDialog" class="dialog">
+      <header>
+        <h2 data-i18n="tools.title">Tools &amp; setup</h2>
+        <button id="toolsClose" class="btn" data-i18n="tools.close">Close</button>
+      </header>
+      <div id="toolsBody"></div>
+    </dialog>
+    <dialog id="aboutDialog" class="dialog small">
+      <header>
+        <h2>Astrotool <span id="aboutVersion" class="mono"></span></h2>
+        <button id="aboutClose" class="btn" data-i18n="tools.close">Close</button>
+      </header>
+      <div class="dialogBody">
+        <p data-i18n="app.tagline">Pre-processing for planets, Moon, Sun &amp; eclipses</p>
+        <p><strong>© 2026 aisuisse</strong> · <span data-i18n="about.license">Free software under the GNU General Public License, version 3 or later (GPL-3.0-or-later).</span></p>
+        <p data-i18n="about.warranty">Astrotool comes with absolutely no warranty. You may use, study, share and improve it under the terms of the GPL.</p>
+        <p><span data-i18n="about.source">Source code:</span> <a href="https://github.com/aisuisse/astrotool" target="_blank" rel="noopener">github.com/aisuisse/astrotool</a></p>
+        <p><small data-i18n="about.thanks">Inspired by PIPP and SER Player by Chris Garry. Astrotool contains no code from either program.</small></p>
+        <p><small><span data-i18n="about.thirdParty">Built with:</span> Tauri (MIT/Apache-2.0), mediabunny (MPL-2.0), gifenc (MIT); optional FFmpeg.</small></p>
+      </div>
+    </dialog>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
