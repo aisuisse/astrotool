@@ -158,6 +158,7 @@ function syncForm() {
   card("checkObject").classList.toggle("disabled", !options.checkObject);
   card("qualityEnabled").classList.toggle("disabled", !options.qualityEnabled);
   for (const k of ["cropWidth", "cropHeight"]) (document.querySelector(`[data-opt="${k}"]`) as HTMLInputElement).disabled = !options.cropEnabled;
+  (document.querySelector(`[data-opt="overexposedLimit"]`) as HTMLInputElement).disabled = !options.rejectOverexposed;
   for (const k of ["hdr", "totalitySunCentre"]) (document.querySelector(`[data-opt="${k}"]`) as HTMLInputElement).disabled = options.centreMode !== "disc" || !options.centre;
   syncAnchor();
 }

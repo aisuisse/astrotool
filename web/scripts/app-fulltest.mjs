@@ -356,6 +356,25 @@ try {
     return { ...r, disk };
   });
 
+  await test("Planet: Bilder bearbeiten – Spiegeln/Drehen roh, Graustufen und Grösse", async () => {
+    // Spiegeln + Drehen: Bayer-Rohdaten bleiben roh, nur das Muster ändert sich (RGGB → GRBG → BGGR)
+    await ev(`__t.set('[data-opt="maxFrames"]', 100); __t.set('[data-tl="enabled"]', false); __t.set('#format', 'ser');
+             __t.set('[data-opt="flipH"]', true); __t.set('[data-opt="rotate"]', '90'); true`);
+    await sleep(800);
+    const card = await ev(`({ title: document.querySelector('#transformCard h2').innerText, preview: [document.getElementById('outCanvas')?.width, document.getElementById('outCanvas')?.height] })`);
+    const raw = await runAndWait(300_000);
+    const s1 = raw.files.find((f) => /\.ser$/.test(f.name));
+    check(s1 && s1.frames === 50 && s1.width === 448 && s1.colorId === 11 && s1.bytes === 178 + 50 * 448 * 448 + 50 * 8, `SER gespiegelt/gedreht: ${JSON.stringify(s1)}`);
+    // Graustufen + halbe Grösse
+    await ev(`__t.set('[data-opt="flipH"]', false); __t.set('[data-opt="rotate"]', '0'); __t.set('[data-opt="mono"]', true); __t.set('[data-opt="resizePercent"]', 50); true`);
+    const small = await runAndWait(300_000);
+    const s2 = small.files.find((f) => /\.ser$/.test(f.name));
+    check(s2 && s2.frames === 50 && s2.width === 224 && s2.height === 224 && s2.colorId === 0 && s2.bytes === 178 + 50 * 224 * 224 + 50 * 8, `SER Graustufen 50 %: ${JSON.stringify(s2)}`);
+    check(/224 ?× ?224/.test(small.text), `Ergebnis nennt die Grösse nicht: ${small.text.slice(0, 200)}`);
+    await ev(`__t.set('[data-opt="mono"]', false); __t.set('[data-opt="resizePercent"]', 100); __t.set('[data-opt="maxFrames"]', 0); true`);
+    return { card, raw: s1, small: s2, text: small.text.slice(0, 300) };
+  });
+
   if (calDir) await test("Planet: Kalibrierung mit Dark, Flat und Bias", async () => {
     const info = (k) => ev(`document.querySelector('[data-cal="${k}"] .calInfo').innerText`);
     for (const [k, f] of [["dark", "dark.ser"], ["flat", "flat.ser"], ["flatDark", "bias.ser"]]) {

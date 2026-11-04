@@ -96,8 +96,10 @@ export interface Detection {
   threshold: number;
   maxValue: number;
   touchesEdge: boolean;
-  /** Anteil Pixel nahe Sättigung (≥ 0.99). */
+  /** Anteil Pixel nahe Sättigung (≥ 0.99) am ganzen Bild. */
   overexposed: number;
+  /** Anteil gesättigter Pixel an der Objektfläche (über der Schwelle) – für „überbelichtete Bilder verwerfen“. */
+  overexposedObject?: number;
 }
 
 export interface DetectOptions {
@@ -114,7 +116,7 @@ export function detectObject(l: Lum, opts: DetectOptions = {}): Detection {
   const minLine = opts.minLineCount ?? 2;
   const rows = new Uint32Array(h);
   const cols = new Uint32Array(w);
-  let sw = 0, sx = 0, sy = 0, max = 0, over = 0;
+  let sw = 0, sx = 0, sy = 0, max = 0, over = 0, overObj = 0;
   for (let y = 0; y < h; y++) {
     const r = y * w;
     for (let x = 0; x < w; x++) {
@@ -122,6 +124,7 @@ export function detectObject(l: Lum, opts: DetectOptions = {}): Detection {
       if (v > max) max = v;
       if (v >= 0.99) over++;
       if (v > thr) {
+        if (v >= 0.99) overObj++;
         // Geometrischer Schwerpunkt der Scheibe: helle Wolkenbänder verschieben ihn nicht.
         sw++;
         sx += x;
@@ -148,6 +151,7 @@ export function detectObject(l: Lum, opts: DetectOptions = {}): Detection {
     maxValue: max,
     touchesEdge: found && (x0 === 0 || y0 === 0 || x1 === w - 1 || y1 === h - 1),
     overexposed: over / d.length,
+    overexposedObject: sw > 0 ? overObj / sw : 0,
   };
 }
 

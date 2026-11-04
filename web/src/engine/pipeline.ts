@@ -8,10 +8,13 @@ import { SerColor, SerReader, SerWriter, type Frame } from "./ser";
 import { debayer, patternFromColorId, type BayerPattern } from "./debayer";
 import { serSource, type FrameSource } from "./source";
 import { SurfaceAligner, type SurfaceBox, type SurfaceShift } from "./surface";
+import { bayerAfterTransform, hasTransform, transformFrame, transformedSize, type TransformOptions } from "./transform";
+import { isBayer } from "./ser";
 import { msg } from "../i18n";
 
-/** Optionen; in Klammern der entsprechende Schalter von pipp_core.exe. */
-export interface ProcessOptions {
+/** Optionen; in Klammern der entsprechende Schalter von pipp_core.exe. Bearbeitung (Graustufen, Spiegeln, Drehen,
+ * Grösse) siehe TransformOptions. */
+export interface ProcessOptions extends TransformOptions {
   startFrame: number; // (-sf=)
   maxFrames: number; // 0 = alle (-f=)
   checkObject: boolean; // (-chk)
@@ -19,6 +22,12 @@ export interface ProcessOptions {
   /** Schwelle 0..1, null = automatisch (-mp=) */
   threshold: number | null;
   rejectEdgeTouching: boolean;
+  /**
+   * Überbelichtete Bilder verwerfen: mehr als overexposedLimit % der Objektfläche (bei „Oberfläche“: des Bildes)
+   * an der Sättigungsgrenze. Bilder der Totalität sind ausgenommen (dort ist die innere Korona gewollt gesättigt).
+   */
+  rejectOverexposed: boolean; // (-oe=)
+  overexposedLimit: number;
   centre: boolean; // (-ctr)
   /**
    * "object": Schwerpunkt der hellen Fläche (wie PIPP).
@@ -70,6 +79,8 @@ export const defaultOptions: ProcessOptions = {
   minObjectSize: 20,
   threshold: null,
   rejectEdgeTouching: false,
+  rejectOverexposed: false,
+  overexposedLimit: 1,
   centre: true,
   centreMode: "object",
   surfaceAnchor: null,
@@ -87,6 +98,11 @@ export const defaultOptions: ProcessOptions = {
   debayerSer: false,
   hdr: false,
   totalitySunCentre: true,
+  mono: false,
+  flipH: false,
+  flipV: false,
+  rotate: 0,
+  resizePercent: 100,
 };
 
 /** Bayer-Muster, das für eine Quelle gilt – oder null (Mono, schon farbig, oder abgeschaltet). */
@@ -102,9 +118,40 @@ export function colourise(f: Frame, o: Pick<ProcessOptions, "debayer">): Frame {
   return p ? debayer(f, p) : f;
 }
 
-/** Farbkennung des SER-Ausgabevideos. */
-export function outputColorId(o: ProcessOptions, src: { colorId: number }): number {
-  return o.debayerSer && bayerPatternFor(o, src) ? SerColor.RGB : src.colorId;
+/** Bearbeitung des fertigen Ausschnitts (Graustufen, Spiegeln, Drehen, Grösse). Bayer-Rohdaten bleiben roh, wenn
+ * das geht (nur Spiegeln/Drehen, Muster aus der Datei) – sonst werden sie vorher farbig gemacht. */
+export function finishFrame(f: Frame, o: ProcessOptions): Frame {
+  if (!hasTransform(o)) return f;
+  return transformFrame(f, o, bayerPatternFor(o, f), o.debayer === "auto");
+}
+
+/**
+ * Ausgabe-Frame farbig machen (PNG, Zeitraffer, Montage). Nach einer Bearbeitung ist ein Rohbild nur noch roh,
+ * wenn sein Muster in der Farbkennung steht – ein festes Muster aus den Optionen gilt dann nicht mehr.
+ */
+export function colouriseOutput(f: Frame, o: ProcessOptions): Frame {
+  if (!hasTransform(o)) return colourise(f, o);
+  const p = o.debayer === "off" || f.planes !== 1 ? null : patternFromColorId(f.colorId);
+  return p ? debayer(f, p) : f;
+}
+
+/** Farbkennung des SER-Ausgabevideos. width/height: Grösse des Ausschnitts vor der Bearbeitung. */
+export function outputColorId(o: ProcessOptions, src: { colorId: number; planes?: number }, width = 2, height = 2): number {
+  const pattern = bayerPatternFor(o, src);
+  if (!hasTransform(o)) return o.debayerSer && pattern ? SerColor.RGB : src.colorId;
+  if (pattern) {
+    const kept = o.debayer === "auto" ? bayerAfterTransform(o, src.colorId, width, height) : null;
+    if (kept !== null) return o.debayerSer ? SerColor.RGB : kept;
+    return o.mono ? SerColor.MONO : SerColor.RGB;
+  }
+  if (isBayer(src.colorId)) return bayerAfterTransform(o, src.colorId, width, height) ?? SerColor.MONO; // Debayer aus
+  return o.mono ? SerColor.MONO : src.colorId;
+}
+
+/** Grösse der gespeicherten Bilder (nach Zuschnitt und Bearbeitung). */
+export function outputSize(src: { width: number; height: number }, o: ProcessOptions): [number, number] {
+  const [w, h] = o.cropEnabled ? [o.cropWidth, o.cropHeight] : [src.width, src.height];
+  return transformedSize(o, w, h);
 }
 
 /** Erkennung, erweitert um den angepassten Kreis (nur bei centreMode "disc"). */
@@ -126,10 +173,14 @@ export const SURFACE_MIN_PEAK = 0.2;
 
 /** Erkennung für die Oberflächen-Stabilisierung: Mitte = Bildmitte + Verschiebung gegenüber der Referenz */
 function surfaceDetection(lum: Lum, s: SurfaceShift): FrameDetection {
-  let max = 0;
-  for (let i = 0; i < lum.data.length; i += 7) if (lum.data[i] > max) max = lum.data[i];
+  let max = 0, over = 0, n = 0;
+  for (let i = 0; i < lum.data.length; i += 7, n++) {
+    if (lum.data[i] > max) max = lum.data[i];
+    if (lum.data[i] >= 0.99) over++;
+  }
   const w = lum.width, h = lum.height;
-  return { ...emptyDetection(), found: true, cx: w / 2 + s.dx, cy: h / 2 + s.dy, x1: w - 1, y1: h - 1, size: Math.min(w, h), maxValue: max, surface: s };
+  const overexposed = over / Math.max(1, n);
+  return { ...emptyDetection(), found: true, cx: w / 2 + s.dx, cy: h / 2 + s.dy, x1: w - 1, y1: h - 1, size: Math.min(w, h), maxValue: max, overexposed, overexposedObject: overexposed, surface: s };
 }
 
 export interface FrameResult {
@@ -253,6 +304,11 @@ export function judge(index: number, det: FrameDetection, o: ProcessOptions): Fr
     // oft falsch (echte Serie: r 124 statt 236) – lieber verwerfen als die Sonne springen lassen
     else if (o.centreMode === "disc" && o.centre && det.disc && det.maxValue < 0.08 && det.disc.rms > 2)
       Object.assign(r, { accepted: false, reason: msg("tooDark") });
+  }
+  // Überbelichtung: Anteil gesättigter Pixel an der Objektfläche. Totalität ausgenommen (Korona gewollt gesättigt).
+  if (r.accepted && o.checkObject && o.rejectOverexposed && det.disc?.kind !== "moon") {
+    const pct = 100 * (det.overexposedObject ?? det.overexposed);
+    if (pct > o.overexposedLimit) Object.assign(r, { accepted: false, reason: msg("overexposed", pct < 10 ? pct.toFixed(1) : Math.round(pct)) });
   }
   return r;
 }
@@ -379,7 +435,7 @@ export async function analyseFrame(src: FrameSource | SerReader, index: number, 
   const [cw, ch] = outSize(s, o);
   const res = judge(index, det, o);
   res.score = o.qualityEnabled && res.accepted ? quality(cropLum(lum, x0, y0, cw, ch), o.quality) : 0;
-  return { frame: colourise(frame, o), det, result: res, crop: { x0, y0, width: cw, height: ch }, output: colourise(cropFrame(frame, x0, y0, cw, ch), o) };
+  return { frame: colourise(frame, o), det, result: res, crop: { x0, y0, width: cw, height: ch }, output: colouriseOutput(finishFrame(cropFrame(frame, x0, y0, cw, ch), o), o) };
 }
 
 export async function processSource(
@@ -479,19 +535,20 @@ export async function processSource(
         const d0 = resOf.get(group[0])!.det.disc;
         const [gx0, gy0] = originFor(src, o, resOf.get(group[0])!.det);
         const moon = d0 ? { cx: d0.cx - gx0, cy: d0.cy - gy0, r: d0.r } : undefined;
-        await sink(mergeHdr(parts, { srgb: src.kind === "images" && !src.linear, moon }), { ...res, hdrGroup: group }, written.length, ts);
+        await sink(finishFrame(mergeHdr(parts, { srgb: src.kind === "images" && !src.linear, moon }), o), { ...res, hdrGroup: group }, written.length, ts);
         written.push(res.index);
       }
     } else {
       const frame = await src.readFrame(res.index);
       const [x0, y0] = originFor(src, o, res.det);
-      await sink(cropFrame(frame, x0, y0, cw, ch), res, written.length, ts);
+      await sink(finishFrame(cropFrame(frame, x0, y0, cw, ch), o), res, written.length, ts);
       written.push(res.index);
     }
     onProgress("write", k + 1, chosen.length);
   }
 
-  return { frames: results, written, hdrGroups, outWidth: cw, outHeight: ch };
+  const [ow, oh] = outputSize(src, o);
+  return { frames: results, written, hdrGroups, outWidth: ow, outHeight: oh };
 }
 
 /** Bequeme Variante für SER → SER (wird von Tests genutzt). */
@@ -502,9 +559,10 @@ export async function processSer(
   shouldCancel: () => boolean = () => false,
 ): Promise<{ blob: Blob; report: ProcessReport }> {
   const [cw, ch] = o.cropEnabled ? [o.cropWidth, o.cropHeight] : [r.header.width, r.header.height];
-  const colorId = outputColorId(o, r.header);
-  const writer = new SerWriter({ ...r.header, colorId, width: cw, height: ch });
-  const sink: FrameSink = (f, _r, _k, ts) => writer.add(colorId === r.header.colorId ? f : colourise(f, o), ts);
+  const colorId = outputColorId(o, r.header, cw, ch);
+  const [ow, oh] = outputSize(r.header, o);
+  const writer = new SerWriter({ ...r.header, colorId, width: ow, height: oh });
+  const sink: FrameSink = (f, _r, _k, ts) => writer.add(f.colorId === colorId ? f : colouriseOutput(f, o), ts);
   const report = await processSource(serSource(r, "frame"), o, sink, onProgress, shouldCancel);
   return { blob: writer.toBlob(), report };
 }

@@ -113,6 +113,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; pa
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .grid label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 12px; }
 .grid label.wide { grid-column: 1 / -1; }
+.grid p.hint { grid-column: 1 / -1; font-size: 12px; margin: 0; }
 .grid label:has(> input[type="checkbox"]) { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 13px; }
 .unit { color: var(--muted); font-size: 11px; }
 input[type="number"], select {

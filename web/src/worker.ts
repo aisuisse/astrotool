@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 // Rechenarbeit läuft hier, damit die Oberfläche flüssig bleibt.
-import { analyseFrame, colourise, outputColorId, processSource, type FrameResult, type ProcessOptions } from "./engine/pipeline";
+import { analyseFrame, colouriseOutput, outputColorId, outputSize, processSource, type FrameResult, type ProcessOptions } from "./engine/pipeline";
+import { transformedSize } from "./engine/transform";
 import { colorName, SerReader, SerWriter, type Frame } from "./engine/ser";
 import { FitsCubeSource, ImageSequenceSource, serSource, type FrameSource, type ImageDecoder } from "./engine/source";
 import { AviSource } from "./engine/avi";
@@ -506,7 +507,10 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       cancel = false;
       const src = activeSource();
       const t0 = performance.now();
+      // Ausschnitt vor und nach der Bearbeitung (Drehen, Grösse)
       const [cw, ch] = m.options.cropEnabled ? [m.options.cropWidth, m.options.cropHeight] : [src.width, src.height];
+      const [ow, oh] = outputSize(src, m.options);
+      const scale = transformedSize(m.options, 100, 100)[0] / 100; // nur für den Scheibendurchmesser der Montage
       const stamps = await src.readTimestamps();
       let blob: Blob | null = null;
       let fileName: string;
@@ -516,20 +520,20 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       const montage = m.montage?.enabled ? new MontageRecorder() : null;
       if (m.format === "none" && !recorder && !montage) throw new Error(msg("noOutput"));
       const addMontage = (f: Frame, r: FrameResult, ts: bigint | undefined) =>
-        montage?.add(f, ts, { totality: r.det.disc?.kind === "moon", hdr: !!r.hdrGroup, discDiameter: r.det.disc ? 2 * r.det.disc.r : undefined });
+        montage?.add(f, ts, { totality: r.det.disc?.kind === "moon", hdr: !!r.hdrGroup, discDiameter: r.det.disc ? 2 * r.det.disc.r * scale : undefined });
 
       // Farbe: PNG und Zeitraffer immer farbig (falls Bayer), SER nur auf Wunsch
-      const col = (f: Frame) => colourise(f, m.options);
+      const col = (f: Frame) => colouriseOutput(f, m.options);
       if (m.format === "ser") {
-        const serColor = outputColorId(m.options, src);
+        const serColor = outputColorId(m.options, src, cw, ch);
         const writer = new SerWriter({
-          luId: 0, colorId: serColor, littleEndianFlag: 0, width: cw, height: ch, bitDepth: src.bitDepth,
+          luId: 0, colorId: serColor, littleEndianFlag: 0, width: ow, height: oh, bitDepth: src.bitDepth,
           observer: src.meta.observer ?? "", instrument: src.meta.instrument ?? "", telescope: src.meta.telescope ?? "",
           dateTime: stamps?.[0] ?? 0n, dateTimeUtc: stamps?.[0] ?? 0n,
         }, await openSink(m.target));
         report = await processSource(src, m.options, async (f, r, _k, ts) => {
-          const c = recorder || montage || serColor !== src.colorId ? col(f) : f;
-          writer.add(serColor !== src.colorId ? c : f, ts);
+          const c = recorder || montage || serColor !== f.colorId ? col(f) : f;
+          writer.add(serColor !== f.colorId ? c : f, ts);
           await writer.sink.drain();
           await recorder?.add(c, ts);
           await addMontage(c, r, ts);

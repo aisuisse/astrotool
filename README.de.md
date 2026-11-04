@@ -45,6 +45,8 @@ Tests: `npm test` · Produktions-Build: `npm run build` (Ausgabe in `web/dist`, 
 | **AVI lesen** (SharpCap, FireCapture & Co.): 8/16 bit grau, Bayer roh, 24/32 bit BGR, MJPEG, Dateien > 4 GB (OpenDML) – ohne Zusatzprogramm | – | ✅ 0.10 |
 | **MP4, MOV, MKV, WebM lesen** (Handy, Systemkamera) über den Video-Dekoder von Windows, Aufnahmedatum aus der Datei | – | ✅ 0.10 |
 | Objekt prüfen, Mindestgrösse, Schwelle auto/manuell | `-chk -ms= -mp=` | ✅ |
+| **Überbelichtete Frames verwerfen** (Anteil des Objekts an der Sättigungsgrenze; Totalität ausgenommen) | `-oe=` | ✅ 0.26 |
+| **Bilder bearbeiten:** Graustufen, Spiegeln, Drehen um 90/180/270°, Grösse in % – Bayer-Rohdaten bleiben roh, wenn nur gespiegelt oder gedreht wird | `-convmono -flip_x -flip_y -rotate90 -resize_en` | ✅ 0.26 |
 | Zentrieren, Zuschneiden, Versatz (Bayer-sicher) | `-ctr -cx= -cy= -ox= -oy=` | ✅ |
 | Qualität: Schärfe mehrstufig, hellster Pixel, Helligkeit | `-q -qmin= -qmax= -qinc= -qhisto -qtotal` | ✅ |
 | Beste N / beste % behalten, Reihenfolge | `-q= -qpcnt= -nr` | ✅ |
