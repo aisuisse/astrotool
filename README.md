@@ -44,12 +44,13 @@ The app is not code-signed yet, so Windows SmartScreen may show *"Windows protec
 | Camera RAW: 16-bit linear Bayer sensor data from DNG, CR2, Sony ARW (lossless, lossy "cRAW" and uncompressed, 0.27), Nikon-compressed NEF, Samsung SRW (NX1/NX500, NX300 family and NX100 family, 0.27) and Fujifilm RAF with Bayer sensor (e.g. X-A5, 0.27); white balance from the camera (NEF, SRW) or derived from the camera's own image | – | ✅ |
 | Object check, minimum size, automatic/manual threshold | `-chk -ms= -mp=` | ✅ |
 | Reject overexposed frames (share of the object at saturation; totality exempt) (0.26) | `-oe=` | ✅ |
-| Edit frames: greyscale, mirror, rotate by 90/180/270°, resize in % – raw Bayer data stays raw when only mirroring/rotating (0.26) | `-convmono -flip_x -flip_y -rotate90 -resize_en` | ✅ |
+| Edit frames: greyscale, mirror, rotate by 90/180/270°, resize in % (0.26) or to width × height (0.29); gain, histogram stretch (target, black point, per colour) and gamma (0.29) – raw Bayer data stays raw for tone changes, mirroring and rotating | `-convmono -flip_x -flip_y -rotate90 -resize_en -resize_width= -resize_height= -input_gain= -hs= -hs_bp -hsrgb -gamma=` | ✅ |
 | Centre, crop, offset (Bayer-safe) | `-ctr -cx= -cy= -ox= -oy=` | ✅ |
 | Quality: multi-scale sharpness, brightest pixel, brightness | `-q -qmin= -qmax= -qinc= -qhisto -qtotal` | ✅ |
 | Keep best N / best %, ordering | `-q= -qpcnt= -nr` | ✅ |
 | Debayer for colour cameras; SER output in colour or as raw Bayer data | `-db -db= -pb` | ✅ |
 | Write SER (timestamps preserved), PNG frames as ZIP or into a folder, CSV log | `-ser -png` | ✅ |
+| WinJUPOS file names (capture time in UT with tenths of a minute, observer code, further details; video named by its start, middle or end; time from the file, the SER header or the file name, can be shifted) (0.29) | `-wjpos_*` | ✅ |
 | Write straight to disk while processing (SER to a file, frames to a folder), also when saving a range from the viewer – no memory limit; ZIP64 for archives > 4 GB | – | ✅ |
 | Full-depth frames: 16-bit PNG, 16-bit TIFF and FITS (capture time, exposure, Bayer pattern in the header) for Siril, PixInsight, DeepSkyStacker | TIFF, FITS | ✅ |
 | Eclipse mode: circle fit to the solar limb, plausibility check on the radius | – (new) | ✅ |
@@ -79,7 +80,7 @@ npm test            # unit tests
 
 Without your own recordings: `npm run sample` creates `sample-jupiter.ser` (a synthetic planet with seeing).
 
-The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 48 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
+The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 49 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
 
 ## How it is built
 

@@ -14,6 +14,7 @@ import { calibratedSource, decodeMaster, encodeMaster, masterStats, MasterBuilde
 import { FileSink, MemorySink, type ByteSink, type WritableFile } from "./engine/sink";
 import { encodeFits, encodePng16, encodeTiff16, type ImageMeta } from "./engine/imagewrite";
 import { captureDate, type TimelapseOptions } from "./engine/timelapse";
+import { seriesTime, shiftMs, timeFromName, winjuposName } from "./engine/winjupos";
 import { TimelapseRecorder, type NativeHevc } from "./timelapse-encode";
 import { MontageRecorder } from "./montage-render";
 import type { MontageOptions } from "./engine/montage";
@@ -69,6 +70,9 @@ export interface FileInfo {
   firstTimestamp: string | null;
   lastTimestamp: string | null;
   fps: number | null;
+  /** Aufnahmezeit (ms, UT) des ersten und letzten Bildes für WinJUPOS-Namen – auch aus Dateinamen; null = unbekannt */
+  wjStart: number | null;
+  wjEnd: number | null;
   /** Bildserie aus Kamera-RAW; rawFormat z. B. "CR2", "DNG lossless" oder "JPEG" (eingebettet) */
   raw: boolean;
   rawFormat: string;
@@ -129,6 +133,8 @@ export type FromWorker =
       timelapseError: string | null;
       montage: { blob: Blob; fileName: string; width: number; height: number; frames: number } | null;
       montageError: string | null;
+      /** WinJUPOS-Namen gewünscht, aber keine Aufnahmezeit bekannt */
+      winjuposMissing?: boolean;
     }
   | { type: "error"; message: string }
   | {
@@ -214,6 +220,42 @@ async function buildMaster(files: File[], rawMode: "raw" | "preview"): Promise<M
   }
 }
 let baseName = "ausgabe";
+/** Aufnahmezeit je Bild (ms, UT) für WinJUPOS-Namen; null = unbekannt */
+let frameTimes: Float64Array | null = null;
+
+/**
+ * Zeiten je Bild: Zeitstempel der Datei (Kamerauhr ohne Zeitzone als Ortszeit dieses Rechners), sonst Startzeit aus
+ * dem SER-Kopf oder aus dem Dateinamen plus Bildnummer / Bildrate. Bildserien ohne EXIF: Zeit aus jedem Dateinamen.
+ */
+function computeFrameTimes(src: FrameSource, stamps: BigInt64Array | null, fileName: string, fps: number | null): Float64Array | null {
+  const n = src.frameCount;
+  if (stamps && stamps.length >= n) {
+    const out = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const d = captureDate(stamps[i], src.clock);
+      if (!d) return null;
+      out[i] = d.getTime();
+    }
+    return out;
+  }
+  if (src.kind === "images") {
+    const names = (src as ImageSequenceSource).entries.map((e) => timeFromName(e.name));
+    return names.every((t) => t !== null) ? Float64Array.from(names as number[]) : null;
+  }
+  const head = src.meta.startUtc ? captureDate(src.meta.startUtc, "utc")?.getTime() ?? null : null;
+  const start = head ?? timeFromName(fileName);
+  if (start === null) return null;
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = start + (fps && fps > 0 ? (i * 1000) / fps : 0);
+  return out;
+}
+
+/** Erstes und letztes verarbeitetes Bild (Startbild, höchstens N Bilder) */
+function processedRange(o: ProcessOptions, n: number): [number, number] {
+  const a = Math.min(n - 1, Math.max(0, o.startFrame | 0));
+  const b = o.maxFrames > 0 ? Math.min(n - 1, a + o.maxFrames - 1) : n - 1;
+  return [a, b];
+}
 /** Ausgabe, die gerade direkt auf die Platte geschrieben wird – bei Fehler oder Abbruch verwerfen */
 let activeSink: ByteSink | null = null;
 
@@ -418,6 +460,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       if (source.kind === "ser" && ts && ts.length > 1 && ts[ts.length - 1] > ts[0]) {
         fps = ((ts.length - 1) * 1e7) / Number(ts[ts.length - 1] - ts[0]);
       }
+      frameTimes = computeFrameTimes(source, ts, m.files.length === 1 ? m.files[0].name : nextName, fps);
       post({
         type: "opened",
         info: {
@@ -427,6 +470,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
           color: colorName(source.colorId), colorId: source.colorId,
           observer: source.meta.observer ?? "", instrument: source.meta.instrument ?? "", telescope: source.meta.telescope ?? "",
           hasTimestamps: !!ts, firstTimestamp: ts ? ticksToIso(ts[0]) : null, lastTimestamp: ts ? ticksToIso(ts[ts.length - 1]) : null, fps,
+          wjStart: frameTimes ? frameTimes[0] : null, wjEnd: frameTimes ? frameTimes[frameTimes.length - 1] : null,
           raw: !!dec.state.format && dec.state.format !== "FITS", rawFormat: dec.state.format, rawHint: dec.state.hint,
         },
       });
@@ -529,6 +573,11 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       let blob: Blob | null = null;
       let fileName: string;
       let report;
+      // WinJUPOS: Name aus der Aufnahmezeit (UT); ohne Zeit bleiben die üblichen Namen
+      const wj = m.options.winjupos && frameTimes && frameTimes.length === src.frameCount ? frameTimes : null;
+      const wjShift = shiftMs(m.options);
+      const [wjA, wjB] = processedRange(m.options, src.frameCount);
+      const wjSeries = wj ? winjuposName(seriesTime(wj[wjA], wj[wjB], m.options.wjTime) + wjShift, m.options) : null;
       const progress = (phase: "analyse" | "write" | "video", done: number, total: number) => post({ type: "progress", phase, done, total });
       const recorder = m.timelapse.enabled ? new TimelapseRecorder() : null;
       const montage = m.montage?.enabled ? new MontageRecorder() : null;
@@ -554,7 +603,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
         }, progress, () => cancel);
         blob = await writer.finish();
         activeSink = null;
-        fileName = `${baseName}_astro.ser`;
+        fileName = wjSeries ? `${wjSeries}.ser` : `${baseName}_astro.ser`;
       } else if (m.format === "none") {
         report = await processSource(src, m.options, async (f, r, _k, ts) => {
           const c = col(f);
@@ -576,9 +625,13 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
             const iso = ticksToIso(ts);
             // HDR-Bild: Belichtungszeit der Reihe ist keine einzelne Zahl mehr
             const { ext, bytes } = await encodeImage(f, m.format, { date: iso ? new Date(iso) : undefined, exposure: r.hdrGroup ? undefined : src.exposure?.(r.index) });
-            const name = r.hdrGroup
-              ? `${prefix}${src.frameName(r.hdrGroup[0])}-${src.frameName(r.hdrGroup[r.hdrGroup.length - 1])}_hdr_astro.${ext}`
-              : `${prefix}${src.frameName(r.index)}_astro.${ext}`;
+            // WinJUPOS: Zeit muss vorne stehen – Nummer (Rang oder Bild) dahinter
+            const num = m.options.qualityEnabled && m.options.reorder ? k + 1 : r.index + 1;
+            const name = wj
+              ? `${winjuposName(wj[r.index] + wjShift, m.options)}_${String(num).padStart(digits, "0")}${r.hdrGroup ? "_hdr" : ""}.${ext}`
+              : r.hdrGroup
+                ? `${prefix}${src.frameName(r.hdrGroup[0])}-${src.frameName(r.hdrGroup[r.hdrGroup.length - 1])}_hdr_astro.${ext}`
+                : `${prefix}${src.frameName(r.index)}_astro.${ext}`;
             if (m.folder) await writeToFolder(m.folder, name, bytes);
             else {
               zip!.add(name, bytes);
@@ -593,7 +646,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
         else zip!.add("astrotool_log.csv", new TextEncoder().encode(csv));
         blob = zip ? await zip.finish() : null;
         activeSink = null;
-        fileName = `${baseName}_astro.zip`;
+        fileName = wjSeries ? `${wjSeries}.zip` : `${baseName}_astro.zip`;
       }
 
       let timelapse = null, timelapseError: string | null = null;
@@ -637,6 +690,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
         timelapseError,
         montage: montageResult,
         montageError,
+        winjuposMissing: !!m.options.winjupos && m.format !== "none" && !wj,
       });
     }
   } catch (e) {

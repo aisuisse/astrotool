@@ -11,7 +11,8 @@ Einsatzgebiete:
 - **Planeten** – Jupiter, Saturn, Mars & Co. trotz Seeing und Nachführfehlern stabil in der Bildmitte.
 - **Mond und Sonne** – Vollscheibe zentrieren, Oberflächen-Ausschnitte stabilisieren (0.22).
 - **Sonnenfinsternisse** – Bildserien über alle Phasen ausrichten und die Sonnenscheibe auch bei schmaler Sichel sauber zentrieren (Kreis am Sonnenrand statt Helligkeits-Schwerpunkt); Aufnahmezeiten bleiben erhalten. Daraus direkt einen Zeitraffer mit eingeblendeter Uhrzeit erstellen; Phasenmontagen folgen.
-- **ISS-Transits, Animationen, WinJUPOS** – wie bei PIPP (geplant).
+- **WinJUPOS** – Dateinamen mit der Aufnahmezeit in UT, direkt für die Derotation (0.29).
+- **ISS-Transits, Animationen** – wie bei PIPP (geplant).
 
 Die Verarbeitung läuft lokal – als Windows-App oder im Browser.
 
@@ -46,11 +47,12 @@ Tests: `npm test` · Produktions-Build: `npm run build` (Ausgabe in `web/dist`, 
 | **MP4, MOV, MKV, WebM lesen** (Handy, Systemkamera) über den Video-Dekoder von Windows, Aufnahmedatum aus der Datei | – | ✅ 0.10 |
 | Objekt prüfen, Mindestgrösse, Schwelle auto/manuell | `-chk -ms= -mp=` | ✅ |
 | **Überbelichtete Frames verwerfen** (Anteil des Objekts an der Sättigungsgrenze; Totalität ausgenommen) | `-oe=` | ✅ 0.26 |
-| **Bilder bearbeiten:** Graustufen, Spiegeln, Drehen um 90/180/270°, Grösse in % – Bayer-Rohdaten bleiben roh, wenn nur gespiegelt oder gedreht wird | `-convmono -flip_x -flip_y -rotate90 -resize_en` | ✅ 0.26 |
+| **Bilder bearbeiten:** Graustufen, Spiegeln, Drehen um 90/180/270°, Grösse in % oder (0.29) als Breite × Höhe; Verstärkung, Histogramm strecken (Ziel, Schwarzpunkt, je Farbe) und Gamma (0.29) – Bayer-Rohdaten bleiben bei Tonwerten, Spiegeln und Drehen roh | `-convmono -flip_x -flip_y -rotate90 -resize_en -resize_width= -resize_height= -input_gain= -hs= -hs_bp -hsrgb -gamma=` | ✅ 0.26, 0.29 |
 | Zentrieren, Zuschneiden, Versatz (Bayer-sicher) | `-ctr -cx= -cy= -ox= -oy=` | ✅ |
 | Qualität: Schärfe mehrstufig, hellster Pixel, Helligkeit | `-q -qmin= -qmax= -qinc= -qhisto -qtotal` | ✅ |
 | Beste N / beste % behalten, Reihenfolge | `-q= -qpcnt= -nr` | ✅ |
 | SER schreiben (Zeitstempel bleiben erhalten) | `-ser` | ✅ |
+| **WinJUPOS-Dateinamen:** Aufnahmezeit in UT mit Zehntelminute, Beobachterkürzel, weitere Angaben; Video nach Beginn, Mitte oder Ende benannt; Zeit aus der Datei, dem SER-Kopf oder dem Dateinamen, verschiebbar | `-wjpos_*` | ✅ 0.29 |
 | Bildserien (JPG, PNG, TIFF) mit Sortierung nach EXIF-Aufnahmezeit | – | ✅ |
 | **Kamera-RAW:** Sensordaten (16 bit, linear, Bayer) von DNG, Canon CR2, Sony ARW (verlustfrei, verlustbehaftet „cRAW“ und unkomprimiert – 0.27), Nikon NEF (komprimiert), Samsung SRW (NX1/NX500, NX300- und NX100-Familie – 0.27), Fujifilm RAF unkomprimiert mit Bayer-Sensor (z. B. X-A5, 0.27) und mit X-Trans-Muster, auch als DNG (0.21, eigene Farbrekonstruktion); für CR3, komprimierte RAF, ORF, RW2 … das eingebettete Kamerabild in voller Grösse. Weissabgleich automatisch aus dem Kamerabild, Aufnahmedaten aus EXIF | – | ✅ 0.11 |
 | **Finsternis-Modus:** Zentrieren per Kreis am Sonnenrand, auch bei schmaler Sichel | – (neu) | ✅ |

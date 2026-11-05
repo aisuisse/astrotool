@@ -9,12 +9,13 @@ import { debayer, patternFromColorId, type BayerPattern } from "./debayer";
 import { serSource, type FrameSource } from "./source";
 import { SurfaceTracker, type SurfaceBox, type SurfaceMotion } from "./surface";
 import { bayerAfterTransform, hasTransform, rotatedCrop, transformFrame, transformedSize, type TransformOptions } from "./transform";
+import type { WinJuposOptions } from "./winjupos";
 import { isBayer } from "./ser";
 import { msg } from "../i18n";
 
 /** Optionen; in Klammern der entsprechende Schalter von pipp_core.exe. Bearbeitung (Graustufen, Spiegeln, Drehen,
  * Grösse) siehe TransformOptions. */
-export interface ProcessOptions extends TransformOptions {
+export interface ProcessOptions extends TransformOptions, WinJuposOptions {
   startFrame: number; // (-sf=)
   maxFrames: number; // 0 = alle (-f=)
   checkObject: boolean; // (-chk)
@@ -109,6 +110,20 @@ export const defaultOptions: ProcessOptions = {
   flipV: false,
   rotate: 0,
   resizePercent: 100,
+  resizeMode: "percent",
+  resizeWidth: 0,
+  resizeHeight: 0,
+  gain: 1,
+  stretch: false,
+  stretchTarget: 100,
+  stretchBlack: false,
+  stretchPerChannel: false,
+  gamma: 1,
+  winjupos: false,
+  wjObserver: "",
+  wjInfo: "",
+  wjTime: "mid",
+  wjShiftMinutes: 0,
 };
 
 /** Bayer-Muster, das für eine Quelle gilt – oder null (Mono, schon farbig, oder abgeschaltet). */

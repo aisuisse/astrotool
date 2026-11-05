@@ -1,4 +1,5 @@
 import { defaultOptions, type ProcessOptions } from "./engine/pipeline";
+import { seriesTime, shiftMs, winjuposName } from "./engine/winjupos";
 import { MIN_ANCHOR } from "./engine/surface";
 import { applyPof, parsePof } from "./engine/pof";
 import { defaultTimelapse, type TimelapseOptions } from "./engine/timelapse";
@@ -50,6 +51,7 @@ function setLang(l: Lang) {
   player.refresh();
   renderCal();
   syncAnchor();
+  syncEdit();
 }
 $("lang").addEventListener("click", () => setLang(lang === "en" ? "de" : "en"));
 
@@ -190,7 +192,35 @@ function syncForm() {
   for (const k of ["cropWidth", "cropHeight"]) (document.querySelector(`[data-opt="${k}"]`) as HTMLInputElement).disabled = !options.cropEnabled;
   (document.querySelector(`[data-opt="overexposedLimit"]`) as HTMLInputElement).disabled = !options.rejectOverexposed;
   for (const k of ["hdr", "totalitySunCentre"]) (document.querySelector(`[data-opt="${k}"]`) as HTMLInputElement).disabled = options.centreMode !== "disc" || !options.centre;
+  syncEdit();
   syncAnchor();
+}
+
+const optEl = (k: string) => document.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-opt="${k}"]`)!;
+const optRow = (k: string) => optEl(k).closest("label") as HTMLElement;
+
+/** Bearbeitung und WinJUPOS: passende Felder zeigen bzw. ausgrauen, Beispielname */
+function syncEdit() {
+  const size = options.resizeMode === "size";
+  optRow("resizePercent").hidden = size;
+  optRow("resizeWidth").hidden = optRow("resizeHeight").hidden = !size;
+  for (const k of ["stretchTarget", "stretchBlack", "stretchPerChannel"]) optEl(k).disabled = !options.stretch;
+  for (const k of ["wjObserver", "wjInfo", "wjTime", "wjShiftMinutes"]) optEl(k).disabled = !options.winjupos;
+  const note = $("wjNote");
+  note.hidden = !options.winjupos || !info;
+  const name = winjuposExample();
+  note.textContent = name ? L("wj.example", name) : L("wj.noTime");
+  note.classList.toggle("warn", !name);
+}
+
+/** Name des Ausgabevideos nach WinJUPOS (Zeiten linear über die Bilder verteilt) – oder null ohne Aufnahmezeit */
+function winjuposExample(ext = formatSel.value === "ser" ? "ser" : "zip"): string | null {
+  if (!info || info.wjStart === null || info.wjEnd === null) return null;
+  const n = info.frameCount;
+  const a = Math.min(n - 1, Math.max(0, options.startFrame | 0));
+  const b = options.maxFrames > 0 ? Math.min(n - 1, a + options.maxFrames - 1) : n - 1;
+  const t = (i: number) => (n > 1 ? info!.wjStart! + ((info!.wjEnd! - info!.wjStart!) * i) / (n - 1) : info!.wjStart!);
+  return `${winjuposName(seriesTime(t(a), t(b), options.wjTime) + shiftMs(options), options)}.${ext}`;
 }
 
 function syncAnchor() {
@@ -572,7 +602,7 @@ $("run").addEventListener("click", async () => {
       if (isImageFormat(format)) folder = await w.showDirectoryPicker({ mode: "readwrite" });
       else if (format === "ser")
         target = await w.showSaveFilePicker({
-          suggestedName: `${info.name}_astro.ser`,
+          suggestedName: (options.winjupos && winjuposExample("ser")) || `${info.name}_astro.ser`,
           types: [{ description: "SER", accept: { "application/octet-stream": [".ser"] } }],
         });
     } catch {
@@ -638,7 +668,10 @@ function updateRunLabel() {
   lbl.dataset.i18n = key; // bleibt beim Sprachwechsel richtig
   lbl.textContent = L(key);
 }
-formatSel.addEventListener("change", updateRunLabel);
+formatSel.addEventListener("change", () => {
+  updateRunLabel();
+  syncEdit();
+});
 
 // ---------- Zeitraffer ----------
 const tlFields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-tl]"));
@@ -718,6 +751,7 @@ function renderDone(m: Extract<FromWorker, { type: "done" }>) {
   const hasScores = m.scores.some((s) => s > 0);
   el.innerHTML = `
     ${m.blob && resultUrl ? `<a class="btn primary" href="${resultUrl}" download="${escapeHtml(m.fileName)}">${escapeHtml(L("result.save", m.fileName, (m.blob.size / 1048576).toFixed(1)))}</a>` : m.savedToFolder ? `<strong>${escapeHtml(L("result.savedToFolder"))}</strong>` : m.savedToFile ? `<strong>${escapeHtml(L("result.savedToFile", m.savedToFile))}</strong>` : ""}
+    ${m.winjuposMissing ? `<small class="warn">${escapeHtml(L("wj.missing"))}</small>` : ""}
     ${tlHtml(m)}
     ${mtHtml(m)}
     <small>${escapeHtml(summary)}</small>
@@ -771,6 +805,7 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       lastDone = null;
       formatSel.value = info.kind === "images" ? "png" : "ser";
       updateRunLabel();
+      syncEdit();
       // Debayer-Optionen nur bei Rohdaten (Mono/Bayer) – JPG/PNG sind schon farbig
       document.querySelectorAll<HTMLElement>(".colourRow").forEach((el) => (el.hidden = info!.colorId >= 100));
       document.querySelectorAll<HTMLElement>(".rawRow").forEach((el) => (el.hidden = !info!.raw));

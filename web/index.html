@@ -259,7 +259,21 @@
                 <option value="270" data-i18n="opt.rotate.270">90° anticlockwise</option>
               </select>
             </label>
+            <label><span data-i18n="opt.resizeMode">Change size</span>
+              <select data-opt="resizeMode">
+                <option value="percent" data-i18n="opt.resizeMode.percent">in percent</option>
+                <option value="size" data-i18n="opt.resizeMode.size">width × height</option>
+              </select>
+            </label>
             <label><span><span data-i18n="opt.resize">Size</span> <span class="unit">%</span></span><input type="number" data-opt="resizePercent" min="10" max="400" step="5" /></label>
+            <label hidden><span><span data-i18n="opt.width">Width</span> <span class="unit" data-i18n="unit.zeroAspect">0 = aspect</span></span><input type="number" data-opt="resizeWidth" min="0" max="16384" step="2" /></label>
+            <label hidden><span><span data-i18n="opt.height">Height</span> <span class="unit" data-i18n="unit.zeroAspect">0 = aspect</span></span><input type="number" data-opt="resizeHeight" min="0" max="16384" step="2" /></label>
+            <label><span><span data-i18n="opt.gain">Gain</span> <span class="unit">×</span></span><input type="number" data-opt="gain" min="0.1" max="10" step="0.1" /></label>
+            <label><span data-i18n="opt.gamma">Gamma</span><input type="number" data-opt="gamma" min="0.2" max="5" step="0.05" /></label>
+            <label class="wide"><input type="checkbox" data-opt="stretch" /> <span data-i18n="opt.stretch">Stretch histogram of each frame</span></label>
+            <label><span><span data-i18n="opt.stretchTarget">Brightest values to</span> <span class="unit">%</span></span><input type="number" data-opt="stretchTarget" min="10" max="100" step="5" /></label>
+            <label class="wide"><input type="checkbox" data-opt="stretchBlack" /> <span data-i18n="opt.stretchBlack">Stretch black point too</span></label>
+            <label class="wide"><input type="checkbox" data-opt="stretchPerChannel" /> <span data-i18n="opt.stretchPerChannel">Each colour separately (also balances colours)</span></label>
             <p class="wide muted hint" data-i18n="opt.transformHint">Applied to the finished frames.</p>
           </div>
         </section>
@@ -300,6 +314,18 @@
             </label>
             <label class="wide colourRow"><input type="checkbox" data-opt="debayerSer" /> <span data-i18n="opt.debayerSer">Save SER video in colour too (off: raw Bayer data for AutoStakkert!)</span></label>
             <label class="wide" id="folderRow"><input type="checkbox" id="toFolder" /> <span id="toFolderLabel" data-i18n="opt.toFolder">Write single frames straight into a folder (instead of ZIP)</span></label>
+            <label class="wide"><input type="checkbox" data-opt="winjupos" /> <span data-i18n="opt.winjupos">File names for WinJUPOS (capture time in UT)</span></label>
+            <label><span data-i18n="opt.wjObserver">Observer code</span><input type="text" data-opt="wjObserver" maxlength="20" placeholder="JS" /></label>
+            <label><span data-i18n="opt.wjInfo">Further details</span><input type="text" data-opt="wjInfo" maxlength="40" placeholder="Jup-RGB" /></label>
+            <label><span data-i18n="opt.wjTime">Time of the video</span>
+              <select data-opt="wjTime">
+                <option value="start" data-i18n="opt.wjTime.start">start</option>
+                <option value="mid" data-i18n="opt.wjTime.mid">middle</option>
+                <option value="end" data-i18n="opt.wjTime.end">end</option>
+              </select>
+            </label>
+            <label><span><span data-i18n="opt.wjShift">Shift time</span> <span class="unit">min</span></span><input type="number" data-opt="wjShiftMinutes" min="-1440" max="1440" step="1" /></label>
+            <p class="wide muted hint" id="wjNote" hidden></p>
           </div>
         </section>
 

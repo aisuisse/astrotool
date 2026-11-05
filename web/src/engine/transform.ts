@@ -1,7 +1,8 @@
-// Bearbeitung der fertigen Ausschnitte vor dem Speichern: Graustufen, Spiegeln, Drehen, Grösse ändern.
-// Wie die Registerkarte „Processing“ bei PIPP (Schalter -convmono, -flip_x, -flip_y, -rotate90/180/270, -resize_en)
-// – eigenständige Implementierung. Grösse hier in Prozent statt Breite × Höhe (Seitenverhältnis bleibt).
-// Reihenfolge: Graustufen → Spiegeln → Drehen → Grösse.
+// Bearbeitung der fertigen Ausschnitte vor dem Speichern: Tonwerte, Graustufen, Spiegeln, Drehen, Grösse ändern.
+// Wie die Registerkarte „Processing“ bei PIPP (Schalter -input_gain, -hs, -gamma, -convmono, -flip_x, -flip_y,
+// -rotate90/180/270, -resize_en/-resize_width/-resize_height) – eigenständige Implementierung.
+// Reihenfolge: Verstärkung → Histogramm strecken → Gamma → Graustufen → Spiegeln → Drehen → Grösse.
+// Tonwerte ändern Bayer-Rohdaten direkt (je Pixel), sie bleiben dabei roh.
 import { SerColor, isBayer, type Frame } from "./ser";
 import { debayer, patternFromColorId, type BayerPattern } from "./debayer";
 
@@ -16,11 +17,31 @@ export interface TransformOptions {
   flipV: boolean;
   /** Drehen im Uhrzeigersinn (Grad). Aus Formularen kann der Wert als Text kommen. */
   rotate: Rotation | `${Rotation}`;
-  /** Grösse in Prozent, 100 = unverändert (10–400) */
+  /** Grösse in Prozent, 100 = unverändert (10–400) – bei resizeMode "percent" */
   resizePercent: number;
+  /** Grösse in Prozent oder als Breite × Höhe in Pixeln (wie PIPP) */
+  resizeMode: "percent" | "size";
+  /** Zielbreite/-höhe nach dem Drehen; 0 = aus der anderen Angabe mit gleichem Seitenverhältnis */
+  resizeWidth: number;
+  resizeHeight: number;
+  /** Verstärkung (Faktor, 1 = unverändert; 0.1–10). Werte über dem Maximum werden abgeschnitten. */
+  gain: number;
+  /** Histogramm jedes Bildes strecken: hellste Werte auf stretchTarget % der Skala */
+  stretch: boolean;
+  /** Ziel für die hellsten Werte in % (10–100) */
+  stretchTarget: number;
+  /** Auch den Schwarzpunkt strecken (dunkelste Werte → 0) */
+  stretchBlack: boolean;
+  /** Jede Farbe einzeln strecken (gleicht zugleich die Farben ab) */
+  stretchPerChannel: boolean;
+  /** Gamma (1 = unverändert, > 1 hellt die Mitteltöne auf; 0.2–5). Für Stacking-Programme besser 1 lassen. */
+  gamma: number;
 }
 
-export const defaultTransform: TransformOptions = { mono: false, flipH: false, flipV: false, rotate: 0, resizePercent: 100 };
+export const defaultTransform: TransformOptions = {
+  mono: false, flipH: false, flipV: false, rotate: 0, resizePercent: 100, resizeMode: "percent", resizeWidth: 0, resizeHeight: 0,
+  gain: 1, stretch: false, stretchTarget: 100, stretchBlack: false, stretchPerChannel: false, gamma: 1,
+};
 
 const MIN_PERCENT = 10, MAX_PERCENT = 400;
 
@@ -29,29 +50,64 @@ function rotation(t: TransformOptions): Rotation {
   return r === 90 || r === 180 || r === 270 ? r : 0;
 }
 
+const MAX_SIZE = 16384;
+
 function scaleOf(t: TransformOptions): number {
   const p = Number(t.resizePercent);
   if (!isFinite(p) || p <= 0 || p === 100) return 1;
   return Math.min(MAX_PERCENT, Math.max(MIN_PERCENT, p)) / 100;
 }
 
-/** Ist überhaupt eine Bearbeitung eingestellt? */
-export function hasTransform(t: TransformOptions): boolean {
-  return t.mono || t.flipH || t.flipV || rotation(t) !== 0 || scaleOf(t) !== 1;
+const px = (v: unknown) => {
+  const n = Math.round(Number(v));
+  return isFinite(n) && n > 0 ? Math.min(MAX_SIZE, n) : 0;
+};
+
+/** Zielgrösse für ein (schon gedrehtes) Bild w × h */
+function resizedSize(t: TransformOptions, w: number, h: number): [number, number] {
+  if (t.resizeMode === "size") {
+    const tw = px(t.resizeWidth), th = px(t.resizeHeight);
+    if (tw && th) return [tw, th];
+    if (tw) return [tw, Math.max(1, Math.round((h * tw) / w))];
+    if (th) return [Math.max(1, Math.round((w * th) / h)), th];
+    return [w, h];
+  }
+  const s = scaleOf(t);
+  return s === 1 ? [w, h] : [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))];
 }
 
-/** Nur Spiegeln/Drehen (dabei bleiben Bayer-Rohdaten erhalten, siehe transformFrame). */
+/** Wird die Grösse geändert? (Breite × Höhe zählt, sobald eine Angabe gesetzt ist) */
+function resizes(t: TransformOptions): boolean {
+  return t.resizeMode === "size" ? px(t.resizeWidth) > 0 || px(t.resizeHeight) > 0 : scaleOf(t) !== 1;
+}
+
+const num = (v: unknown, def: number, lo: number, hi: number) => {
+  const n = Number(v);
+  return isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def;
+};
+const gainOf = (t: Partial<TransformOptions>) => num(t.gain ?? 1, 1, 0.1, 10);
+const gammaOf = (t: Partial<TransformOptions>) => num(t.gamma ?? 1, 1, 0.2, 5);
+
+/** Werden Tonwerte geändert? */
+export function hasTone(t: Partial<TransformOptions>): boolean {
+  return gainOf(t) !== 1 || gammaOf(t) !== 1 || !!t.stretch;
+}
+
+/** Ist überhaupt eine Bearbeitung eingestellt? */
+export function hasTransform(t: TransformOptions): boolean {
+  return t.mono || t.flipH || t.flipV || rotation(t) !== 0 || resizes(t) || hasTone(t);
+}
+
+/** Nur Spiegeln/Drehen/Tonwerte (dabei bleiben Bayer-Rohdaten erhalten, siehe transformFrame). */
 function geometricOnly(t: TransformOptions): boolean {
-  return !t.mono && scaleOf(t) === 1;
+  return !t.mono && !resizes(t);
 }
 
 /** Grösse nach der Bearbeitung. */
 export function transformedSize(t: TransformOptions, w: number, h: number): [number, number] {
   const r = rotation(t);
-  let [ow, oh] = r === 90 || r === 270 ? [h, w] : [w, h];
-  const s = scaleOf(t);
-  if (s !== 1) [ow, oh] = [Math.max(1, Math.round(ow * s)), Math.max(1, Math.round(oh * s))];
-  return [ow, oh];
+  const [ow, oh] = r === 90 || r === 270 ? [h, w] : [w, h];
+  return resizedSize(t, ow, oh);
 }
 
 /**
@@ -78,17 +134,74 @@ export function transformFrame(f: Frame, t: TransformOptions, pattern: BayerPatt
   if (!hasTransform(t)) return f;
   if (f.planes === 1 && pattern) {
     const id = keepBayer && isBayer(f.colorId) ? bayerAfterTransform(t, f.colorId, f.width, f.height) : null;
-    if (id !== null) return { ...geometry(f, t), colorId: id };
+    if (id !== null) return { ...geometry(tone(f, t, pattern), t), colorId: id };
     f = debayer(f, pattern);
   }
+  f = tone(f, t, null);
   if (t.mono && f.planes === 3) f = toMono(f);
   f = geometry(f, t);
-  const s = scaleOf(t);
-  return s === 1 ? f : resize(f, ...transformedSizeAfterGeometry(f, s));
+  return resizes(t) ? resize(f, ...resizedSize(t, f.width, f.height)) : f;
 }
 
-function transformedSizeAfterGeometry(f: Frame, s: number): [number, number] {
-  return [Math.max(1, Math.round(f.width * s)), Math.max(1, Math.round(f.height * s))];
+/**
+ * Tonwerte: Verstärkung → Histogramm strecken → Gamma, als Tabelle je Farbe. `pattern`: Bayer-Muster, wenn das Bild
+ * Rohdaten enthält (dann gilt beim Strecken je Farbe die Farbe der Bayer-Zelle).
+ * Strecken: Schwarz- und Weisspunkt sind die dunkelsten 0.1 % bzw. hellsten 0.01 % der Pixel – einzelne heisse
+ * Pixel verschieben sie so nicht.
+ */
+export function tone(f: Frame, t: Partial<TransformOptions>, pattern: BayerPattern | null): Frame {
+  if (!hasTone(t)) return f;
+  const { width: w, planes: p, data: d } = f;
+  const max = (1 << f.bitDepth) - 1;
+  const gain = gainOf(t), invG = 1 / gammaOf(t);
+  const perChannel = !!t.stretch && !!t.stretchPerChannel && (p === 3 || !!pattern);
+  const channels = perChannel ? 3 : 1;
+  const bgr = f.colorId === SerColor.BGR;
+  // Farbe je Wert: bei RGB-Bildern Kanal i % 3, bei Bayer aus der Lage im Muster
+  const cfa = pattern ? Array.from(pattern, (c) => "RGB".indexOf(c)) : null;
+  const chan = (i: number): number => {
+    if (!perChannel) return 0;
+    if (p === 3) return bgr ? 2 - (i % 3) : i % 3;
+    const x = i % w, y = (i / w) | 0;
+    return cfa![((y & 1) << 1) | (x & 1)];
+  };
+  const range: [number, number][] = [];
+  for (let c = 0; c < channels; c++) range.push([0, max]);
+  if (t.stretch) {
+    const hist = Array.from({ length: channels }, () => new Uint32Array(max + 1));
+    const total = new Float64Array(channels);
+    for (let i = 0; i < d.length; i++) {
+      const c = chan(i);
+      hist[c][Math.min(max, d[i])]++;
+      total[c]++;
+    }
+    for (let c = 0; c < channels; c++) {
+      const hs = hist[c], lowCount = total[c] * 0.001, highCount = total[c] * 0.0001;
+      let lo = 0, hi = max;
+      if (t.stretchBlack) for (let v = 0, s = 0; v <= max; v++) { s += hs[v]; if (s > lowCount) { lo = v; break; } }
+      for (let v = max, s = 0; v >= 0; v--) { s += hs[v]; if (s > highCount) { hi = v; break; } }
+      range[c] = hi > lo ? [lo, hi] : [0, max];
+    }
+  }
+  const target = t.stretch ? num(t.stretchTarget ?? 100, 100, 10, 100) / 100 : 1;
+  const luts = range.map(([lo, hi]) => {
+    const lut = d instanceof Uint16Array ? new Uint16Array(max + 1) : new Uint8Array(max + 1);
+    // die Streckung bezieht sich auf die verstärkten Werte
+    const glo = Math.min(max, lo * gain), ghi = Math.min(max, hi * gain);
+    for (let v = 0; v <= max; v++) {
+      const g = Math.min(max, v * gain);
+      let x = t.stretch && ghi > glo ? ((g - glo) / (ghi - glo)) * target : g / max;
+      x = Math.min(1, Math.max(0, x));
+      lut[v] = Math.round(Math.pow(x, invG) * max);
+    }
+    return lut;
+  });
+  const out = d instanceof Uint16Array ? new Uint16Array(d.length) : new Uint8Array(d.length);
+  if (channels === 1) {
+    const lut = luts[0];
+    for (let i = 0; i < d.length; i++) out[i] = lut[Math.min(max, d[i])];
+  } else for (let i = 0; i < d.length; i++) out[i] = luts[chan(i)][Math.min(max, d[i])];
+  return { ...f, data: out };
 }
 
 /** Graustufen nach Rec. 601 (0.299 R + 0.587 G + 0.114 B) – wie die meisten Kameras und Bildprogramme. */

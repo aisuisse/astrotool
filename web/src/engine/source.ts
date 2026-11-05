@@ -17,7 +17,7 @@ export interface FrameSource {
   readTimestamps(): Promise<BigInt64Array | null>;
   /** Name für Ausgabedateien, z. B. "SAM_3105" */
   frameName(index: number): string;
-  meta: { observer?: string; instrument?: string; telescope?: string };
+  meta: { observer?: string; instrument?: string; telescope?: string; startUtc?: bigint };
   /**
    * Zeitbasis der Zeitstempel: "utc" (SER, EXIF mit Zeitzone) oder "local" (Kamerauhr ohne Zeitzone –
    * die Ticks enthalten dann die Ortszeit der Kamera, als wäre sie UTC).
@@ -46,7 +46,8 @@ export function serSource(r: SerReader, baseName: string): FrameSource {
     readFrame: (i) => r.readFrame(i),
     readTimestamps: () => r.readTimestamps(),
     frameName: (i) => `${baseName}_${String(i + 1).padStart(digits, "0")}`,
-    meta: { observer: h.observer, instrument: h.instrument, telescope: h.telescope },
+    // Startzeit aus dem Kopf – für Dateien ohne Zeitstempel je Bild
+    meta: { observer: h.observer, instrument: h.instrument, telescope: h.telescope, startUtc: h.dateTimeUtc > 0n ? h.dateTimeUtc : undefined },
     clock: "utc",
   };
 }

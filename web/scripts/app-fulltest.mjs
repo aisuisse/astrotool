@@ -375,6 +375,35 @@ try {
     return { card, raw: s1, small: s2, text: small.text.slice(0, 300) };
   });
 
+  await test("Planet: WinJUPOS-Namen, Breite × Höhe, Strecken und Gamma", async () => {
+    await ev(`__t.set('[data-opt="maxFrames"]', 100); __t.set('[data-tl="enabled"]', false); __t.set('#format', 'ser');
+             __t.set('[data-opt="winjupos"]', true); __t.set('[data-opt="wjObserver"]', 'JS'); __t.set('[data-opt="wjInfo"]', 'Sat');
+             __t.set('[data-opt="resizeMode"]', 'size'); __t.set('[data-opt="resizeWidth"]', 300); __t.set('[data-opt="resizeHeight"]', 0);
+             __t.set('[data-opt="stretch"]', true); __t.set('[data-opt="gamma"]', 1.2); true`);
+    await sleep(1500);
+    const note = await ev(`document.getElementById('wjNote').innerText`);
+    const expected = (note.match(/(2022-10-25-0055_\d-JS-Sat)\.ser/) || [])[1];
+    check(expected, `Beispielname: ${note}`);
+    const preview = await ev(`[document.getElementById('outCanvas')?.width, document.getElementById('outCanvas')?.height]`);
+    // SER: Name aus der Mitte der 100 Bilder, 300 × 300 (Grösse ändern macht farbig)
+    const r1 = await runAndWait(300_000);
+    const s1 = r1.files.find((f) => /\.ser$/.test(f.name));
+    check(s1 && s1.name === `${expected}.ser` && s1.frames === 50 && s1.width === 300 && s1.height === 300 && s1.colorId === 100, `SER: ${JSON.stringify(s1)}`);
+    // PNG: ZIP und jedes Bild mit eigener Zeit vorne, Nummer hinten
+    await ev(`__t.set('#format', 'png'); true`);
+    const r2 = await runAndWait(300_000);
+    const z = r2.files.find((f) => /\.zip$/.test(f.name));
+    check(z && /^2022-10-25-0055_\d-JS-Sat\.zip$/.test(z.name) && /^2022-10-25-0055_\d-JS-Sat_\d+\.png$/.test(z.first) && z.entries === 51, `ZIP: ${JSON.stringify(z)}`);
+    // nur Tonwerte: Bayer-Rohdaten bleiben roh
+    await ev(`__t.set('#format', 'ser'); __t.set('[data-opt="resizeWidth"]', 0); __t.set('[data-opt="winjupos"]', false); true`);
+    const r3 = await runAndWait(300_000);
+    const s3 = r3.files.find((f) => /\.ser$/.test(f.name));
+    check(s3 && s3.name === "saturn600_astro.ser" && s3.width === 448 && s3.colorId === 8, `SER roh: ${JSON.stringify(s3)}`);
+    await ev(`__t.set('[data-opt="stretch"]', false); __t.set('[data-opt="gamma"]', 1); __t.set('[data-opt="resizeMode"]', 'percent');
+              __t.set('[data-opt="wjObserver"]', ''); __t.set('[data-opt="wjInfo"]', ''); __t.set('[data-opt="maxFrames"]', 0); true`);
+    return { note, preview, ser: s1, zip: z, raw: s3 };
+  });
+
   if (calDir) await test("Planet: Kalibrierung mit Dark, Flat und Bias", async () => {
     const info = (k) => ev(`document.querySelector('[data-cal="${k}"] .calInfo').innerText`);
     for (const [k, f] of [["dark", "dark.ser"], ["flat", "flat.ser"], ["flatDark", "bias.ser"]]) {
