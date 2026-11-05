@@ -24,6 +24,24 @@ function eclipse(w: number, h: number, sx: number, sy: number, R: number, mx: nu
   return { width: w, height: h, data: d };
 }
 
+/**
+ * Sonne mit starkem Randabfall wie beim Smart-Teleskop Vespera (echte Serie Metz 12.08.2026: Mitte 158, Rand 70–90):
+ * Helligkeit 0.3 + 0.7·µ^0.8, µ = cos des Winkels zur Sichtlinie. Mond (mx, my, Rm) davor.
+ */
+function darkLimb(w: number, h: number, sx: number, sy: number, R: number, mx: number, my: number, Rm: number, seed = 1): Lum {
+  const rand = rng(seed);
+  const d = new Float32Array(w * h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const ds = Math.hypot(x - sx, y - sy), dm = Math.hypot(x - mx, y - my);
+      const mu = Math.sqrt(Math.max(0, 1 - Math.min(1, ds / R) ** 2));
+      const edge = 1 / (1 + Math.exp((ds - R) / 0.8));
+      const moon = 1 / (1 + Math.exp((Rm - dm) / 0.8));
+      d[y * w + x] = Math.max(0, 0.6 * edge * moon * (0.3 + 0.7 * mu ** 0.8) + (rand() - 0.5) * 0.01);
+    }
+  return { width: w, height: h, data: d };
+}
+
 describe("Sonnenrand-Anpassung", () => {
   it("Kreisanpassung trifft exakte Punkte", () => {
     const xs: number[] = [], ys: number[] = [];
@@ -42,6 +60,21 @@ describe("Sonnenrand-Anpassung", () => {
     expect(f.r).toBeGreaterThan(89);
     expect(f.r).toBeLessThan(91.5);
     expect(f.visibleLimb).toBeGreaterThan(0.95);
+  });
+
+  it("starker Randabfall: Vollscheibe und Sichel genau, Mondrand nicht als Sonnenrand", () => {
+    const full = fitSunDisc(darkLimb(500, 400, 250.6, 199.3, 150, -900, -900, 10), { random: rng(5) });
+    expect(Math.hypot(full.cx - 250.6, full.cy - 199.3)).toBeLessThan(0.3);
+    expect(Math.abs(full.r - 150)).toBeLessThan(0.6);
+    expect(full.visibleLimb).toBeGreaterThan(0.95);
+    for (const [mx, my, maxVis] of [[380, 120, 0.85], [300, 170, 0.6]]) {
+      const f = fitSunDisc(darkLimb(500, 400, 250.6, 199.3, 150, mx, my, 155, 2), { random: rng(9) });
+      expect(Math.hypot(f.cx - 250.6, f.cy - 199.3)).toBeLessThan(0.5);
+      expect(Math.abs(f.r - 150)).toBeLessThan(0.8);
+      expect(f.visibleLimb).toBeLessThan(maxVis);
+      expect(f.visibleLimb).toBeGreaterThan(0.2);
+      expect(f.rms).toBeLessThan(0.5);
+    }
   });
 
   for (const [label, mx, my] of [["breite Sichel", 260, 140], ["schmale Sichel", 220, 160]] as const) {
