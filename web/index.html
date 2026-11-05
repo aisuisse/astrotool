@@ -17,7 +17,7 @@
       <div class="actions">
         <label class="btn primary">
           <span data-i18n="btn.open">Open</span>
-          <input id="file" type="file" accept=".ser,.avi,.mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden />
+          <input id="file" type="file" accept=".ser,.avi,.mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden />
         </label>
         <div id="recentWrap" class="recentWrap" hidden>
           <button id="recentBtn" class="btn" aria-haspopup="true" aria-expanded="false" data-i18n="recent.btn">Recent ▾</button>
@@ -221,7 +221,7 @@
           <h2 data-i18n="card.cal">Calibration (dark / flat)</h2>
           <div class="cal">
             <div class="calRow" data-cal="dark">
-              <label class="btn"><span data-i18n="cal.dark">Darks …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              <label class="btn"><span data-i18n="cal.dark">Darks …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
               <label><input type="checkbox" data-cal-use="dark" disabled /> <span data-i18n="cal.apply">apply</span></label>
               <label><input type="checkbox" id="calScale" checked /> <span data-i18n="cal.scale">scale to exposure</span></label>
               <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
@@ -229,14 +229,14 @@
               <small class="calInfo"></small>
             </div>
             <div class="calRow" data-cal="flat">
-              <label class="btn"><span data-i18n="cal.flat">Flats …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              <label class="btn"><span data-i18n="cal.flat">Flats …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
               <label><input type="checkbox" data-cal-use="flat" disabled /> <span data-i18n="cal.apply">apply</span></label>
               <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
               <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
               <small class="calInfo"></small>
             </div>
             <div class="calRow" data-cal="flatDark">
-              <label class="btn"><span data-i18n="cal.flatDark">Flat darks / bias …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              <label class="btn"><span data-i18n="cal.flatDark">Flat darks / bias …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
               <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
               <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
               <small class="calInfo"></small>

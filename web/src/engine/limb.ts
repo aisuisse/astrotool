@@ -49,9 +49,18 @@ export function percentile(d: Float32Array, p: number): number {
   return 1;
 }
 
-/** Schwelle bei halber Höhe zwischen Hintergrund (Median) und Scheibe (99.9 %-Wert). */
+/**
+ * Hintergrund: Median der Pixel. Füllt die Scheibe mehr als das halbe Bild (Sonnenteleskope wie GONG, Scheibe
+ * 60 % der Fläche), liegt der Median auf der Scheibe – dann das dunkelste Zwanzigstel.
+ */
+export function backgroundLevel(l: Lum): number {
+  const med = percentile(l.data, 0.5), lo = percentile(l.data, 0.05), peak = percentile(l.data, 0.999);
+  return med > lo + 0.3 * (peak - lo) ? lo : med;
+}
+
+/** Schwelle bei halber Höhe zwischen Hintergrund und Scheibe (99.9 %-Wert). */
 export function halfMaxThreshold(l: Lum): number {
-  const bg = percentile(l.data, 0.5);
+  const bg = backgroundLevel(l);
   const peak = percentile(l.data, 0.999);
   return bg + (peak - bg) / 2;
 }
@@ -186,7 +195,7 @@ export function fitSunDisc(l: Lum, opts: DiscOptions = {}): DiscFit {
   // Teleskope, echte Serie Metz 2026: Mitte 158, Rand 70–90) ist der Rand dunkler als die Hälfte der Mitte – dann
   // fielen fast alle Randpunkte weg. 30 % der Spanne liegen sicher über der Mondscheibe und dem Himmel.
   const innerThr = opts.threshold ?? (() => {
-    const bg = percentile(s.data, 0.5);
+    const bg = backgroundLevel(s);
     return bg + 0.3 * (percentile(s.data, 0.999) - bg);
   })();
   // Der Rand ist dort, wo die Helligkeit am steilsten abfällt – nicht dort, wo sie eine Schwelle kreuzt.
@@ -208,15 +217,14 @@ export function fitSunDisc(l: Lum, opts: DiscOptions = {}): DiscFit {
         prof.push(v);
       }
       if (!ok || prof.length < 5) continue;
-      // grösster Anstieg nach innen (geglättet über 3 Schritte)
+      // grösster Anstieg nach innen (geglättet über 3 Schritte) – nur wo es innen hell ist (Sonne, nicht Mond,
+      // Wolke oder die graue Fläche innerhalb einer Blende: deren Kante ist oft steiler als der Sonnenrand, GONG)
       let best = -1, bestG = 0;
       for (let i = 1; i < prof.length - 2; i++) {
         const g = (prof[i + 2] - prof[i - 1]) / 3;
-        if (g > bestG) { bestG = g; best = i; }
+        if (g > bestG && prof[Math.min(prof.length - 1, i + 6)] >= innerThr) { bestG = g; best = i; }
       }
       if (best < 2 || best > prof.length - 4) continue;
-      // innen muss es hell sein (Sonne, nicht Mond oder Wolke)
-      if (prof[Math.min(prof.length - 1, best + 6)] < innerThr) continue;
       const gm = (prof[best + 1] - prof[best - 2]) / 3, gp = (prof[best + 3] - prof[best]) / 3;
       const den = gm - 2 * bestG + gp;
       const sub = den < 0 ? (0.5 * (gm - gp)) / den : 0;

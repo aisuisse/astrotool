@@ -6,7 +6,7 @@ import { colorName, SerReader, SerWriter, type Frame } from "./engine/ser";
 import { FitsCubeSource, ImageSequenceSource, serSource, type FrameSource, type ImageDecoder } from "./engine/source";
 import { AviSource } from "./engine/avi";
 import { RAW_EXT, rawPreview } from "./engine/raw";
-import { decodeFits, FITS_EXT, isFits } from "./engine/fits";
+import { decodeFits, FITS_EXT, fitsBaseName, isFits } from "./engine/fits";
 import { decodeRawData, rawUnsupported, whiteBalanceFrom } from "./engine/rawdata";
 import { MediaVideoSource } from "./video";
 import { ZipWriter } from "./engine/zip";
@@ -188,7 +188,7 @@ async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = 
   } else if (files.length === 1 && FITS_EXT.test(files[0].name) && (cube = await FitsCubeSource.open(files[0], files[0].name))) {
     // FITS mit mehreren Bildern (Würfel, Erweiterungen): wie ein SER-Video
     src = cube;
-    name = files[0].name.replace(/\.[^.]+$/, "");
+    name = fitsBaseName(files[0].name);
     dec.state.format = "FITS";
   } else {
     const images = files.filter((f) => /\.(jpe?g|png|tiff?|webp|bmp)$/i.test(f.name) || RAW_EXT.test(f.name) || FITS_EXT.test(f.name));

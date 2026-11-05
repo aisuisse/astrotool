@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 const args = process.argv.slice(2);
 const exe = args[0], outDir = args[1] && resolve(args[1]);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
-const smallSer = opt("--ser"), imageDir = opt("--images"), bigSer = opt("--big"), totalityDir = opt("--totality"), aviDir = opt("--avi"), rawDir = opt("--raw"), calDir = opt("--cal"), fitsDir = opt("--fits"), fitsCube = opt("--fitscube"), surfaceSer = opt("--surface");
+const smallSer = opt("--ser"), imageDir = opt("--images"), bigSer = opt("--big"), totalityDir = opt("--totality"), aviDir = opt("--avi"), rawDir = opt("--raw"), calDir = opt("--cal"), fitsDir = opt("--fits"), fitsCube = opt("--fitscube"), surfaceSer = opt("--surface"), fzDir = opt("--fz");
 if (!exe || !outDir || !smallSer || !imageDir) {
   console.error("Aufruf: node scripts/app-fulltest.mjs <astrotool.exe> <ausgabeordner> --ser <klein.ser> --images <bilderordner> [--big <gross.ser>]");
   process.exit(2);
@@ -655,7 +655,7 @@ try {
       return { info: i };
     });
     for (const [sub, re, title] of [["cr2", /CR2/, "IMG_"], ["dng", /DNG lossless/, "NM2A"], ["nef", /NEF compressed/, "DSC_"], ["cr3", /JPEG.*CR3.*DNG Converter/, "Donald"], ["raf", /JPEG.*RAF.*DNG Converter/, "_DSF"], ["raf-unc", /RAF uncompressed.*(Sensordaten|sensor data)/, "DSCF"], ["srw", /SRW compressed/, "SAM_"],
-      ["arw-lossy", /ARW compressed/, "_DSC0009"], ["srw-nx300", /SRW compressed/, "nx300"], ["srw-nx100", /SRW packed/, "RAW_SAMSUNG"], ["raf-bayer", /RAF uncompressed \(Bayer\)/, "DSCF0617"]]) {
+      ["arw-lossy", /ARW compressed/, "_DSC0009"], ["srw-nx300", /SRW compressed/, "nx300"], ["srw-nx100", /SRW packed/, "RAW_SAMSUNG"], ["srw-nx2000", /SRW compressed/, "_3240014"], ["raf-bayer", /RAF uncompressed \(Bayer\)/, "DSCF0617"]]) {
       if (!readdirSync(rawDir).includes(sub)) continue;
       await test(`RAW: ${sub.toUpperCase()} öffnen und Vorschau`, async () => {
         // alte Beurteilung leeren, damit nur die neue Vorschau zählt
@@ -689,6 +689,25 @@ try {
     const half = Math.round(files.length / 2);
     check(ser && ser.frames === half && ser.colorId === 8 && ser.width === 448, `SER: ${JSON.stringify(ser)}`);
     return { info: i, ...r };
+  });
+
+  // ---------- Komprimiertes FITS (.fits.fz, Rice): GONG Hα Teneriffa 12.08.2026, partielle Finsternis ----------
+  if (fzDir) await test("FITS komprimiert (.fits.fz): GONG-Finsternis, Sonnenrand → PNG", async () => {
+    const all = readdirSync(fzDir).filter((f) => /\.fits\.fz$/i.test(f)).sort();
+    const files = all.filter((_, i) => i % 6 === 0).map((f) => resolve(join(fzDir, f))); // Vollscheibe bis tiefe Phase
+    await openFiles(files, "20260812");
+    const i = await ev(`document.getElementById('info').innerText.replace(/\\n/g, ' | ')`);
+    check(/2048 × 2048/.test(i) && /16 bit/.test(i) && /2026-08-12 17:50/.test(i) && new RegExp(`${files.length}`).test(i), `Info: ${i}`);
+    await processMode();
+    await ev(`document.querySelector('[data-preset="eclipse"]').click(); true`);
+    await sleep(800);
+    await ev(`__t.set('[data-opt="cropWidth"]', 1900); __t.set('[data-opt="cropHeight"]', 1900); __t.set('#format', 'png'); __t.set('[data-tl="enabled"]', false); true`);
+    const r = await runAndWait(600_000);
+    const zip = r.files.find((f) => /\.zip$/.test(f.name));
+    const dia = Number((r.text.match(/[Øø]\s*([\d.]+)/) || [])[1]);
+    // Sonnendurchmesser: GONG rechnet Vollscheiben auf 1800 px um, in der Finsternis ~1762 px (unbearbeitet)
+    check(zip && zip.entries === files.length + 1 && /(^|\D)0 (rejected|verworfen)/.test(r.text) && dia > 1750 && dia < 1810, `ZIP ${JSON.stringify(zip)}, Ø ${dia}: ${r.text.slice(0, 300)}`);
+    return { info: i, files: r.files, diameter: dia };
   });
 
   // ---------- FITS-Würfel (scripts/make-fits-testset.mjs <ser> <datei.fits>: alle Bilder in einer Datei) ----------

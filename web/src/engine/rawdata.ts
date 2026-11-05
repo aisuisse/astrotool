@@ -677,6 +677,11 @@ async function decodeRaf(b: Blob): Promise<RafRaw | "compressed" | null> {
   } else return "compressed";
   const top = u16(0x110, 0) ?? 0, left = u16(0x110, 1) ?? 0;
   const ch = u16(0x111, 0) ?? h - top, cw = u16(0x111, 1) ?? w - left;
+  // EXR-Sensor (z. B. X10, F550EXR): das fertige Bild (Satz 0x112: Breite, Höhe) ist rund √2-mal so breit wie die
+  // Rohdaten, und deren Farbmuster ist kein Bayer (Anordnung nicht öffentlich beschrieben) – nicht als Sensordaten
+  // lesen, sonst wären die Farben falsch; die App nimmt dann das Kamerabild. Bei Bayer- und X-Trans-Kameras gleich gross.
+  const outW = u16(0x112, 0);
+  if (!xt && outW && outW > cw * 1.25) return null;
   const bl = t.get(0xf00a);
   const g = t.get(0xf00e) ?? t.get(0xf00d); // G, R, B
   return {
@@ -878,9 +883,11 @@ export async function decodeRawData(b: Blob, wb?: [number, number, number]): Pro
       } else return null;
       const si = await samsungInfo(b, ifds, le);
       // Sichtbarer Bereich: MakerNote, wenn er im Sensor liegt (NX100); bei der NX300-Familie reicht er darüber
-      // hinaus – dort gilt die gegen das Kamerabild gemessene Lage (5472 × 3648 ab links 52, oben 29)
+      // hinaus – dort gilt die gegen das Kamerabild gemessene Lage des 5472 × 3648-Bilds: NX300/NX300M (Sensor
+      // 5546 breit) ab links 52, oben 29; NX2000 (5536 breit) ab links 40, oben 24 (Korrelation 0.98)
       if (si.crop && si.crop.right <= w && si.crop.bottom <= h) nikonCrop = si.crop;
       else if (w === 5546 && h === 3714) nikonCrop = { left: 52, top: 29, right: 52 + 5472, bottom: 29 + 3648 };
+      else if (w === 5536 && h === 3714) nikonCrop = { left: 40, top: 24, right: 40 + 5472, bottom: 24 + 3648 };
       // Schwarzwert 0: an NX100 und NX300 gegen das Kamerabild geprüft (Farbkorrelation 0.95 bzw. 0.65, Weissabgleich
       // wie die Kamera); der Wert 0xa028 der MakerNote passt hier nicht zu den Rohdaten (rund 390)
       samsungBlack = 0;

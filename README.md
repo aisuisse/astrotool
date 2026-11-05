@@ -41,7 +41,7 @@ The app is not code-signed yet, so Windows SmartScreen may show *"Windows protec
 | Read AVI: 8/16-bit mono, raw Bayer, 24/32-bit BGR, MJPEG, files > 4 GB (OpenDML) | – | ✅ |
 | Read MP4, MOV, MKV, WebM via the system video decoder, capture date from metadata | – | ✅ |
 | Image series (JPG, PNG, TIFF, camera RAW), sorted by EXIF capture time | – | ✅ |
-| Camera RAW: 16-bit linear Bayer sensor data from DNG, CR2, Sony ARW (lossless, lossy "cRAW" and uncompressed, 0.27), Nikon-compressed NEF, Samsung SRW (NX1/NX500, NX300 family and NX100 family, 0.27) and Fujifilm RAF with Bayer sensor (e.g. X-A5, 0.27); white balance from the camera (NEF, SRW) or derived from the camera's own image | – | ✅ |
+| Camera RAW: 16-bit linear Bayer sensor data from DNG, CR2, Sony ARW (lossless, lossy "cRAW" and uncompressed, 0.27), Nikon-compressed NEF, Samsung SRW (NX1/NX500, NX300 family incl. NX300M and NX2000, NX100 family, 0.27/0.30) and Fujifilm RAF with Bayer sensor (e.g. X-A5, 0.27); white balance from the camera (NEF, SRW) or derived from the camera's own image | – | ✅ |
 | Object check, minimum size, automatic/manual threshold | `-chk -ms= -mp=` | ✅ |
 | Reject overexposed frames (share of the object at saturation; totality exempt) (0.26) | `-oe=` | ✅ |
 | Edit frames: greyscale, mirror, rotate by 90/180/270°, resize in % (0.26) or to width × height (0.29); gain, histogram stretch (target, black point, per colour) and gamma (0.29) – raw Bayer data stays raw for tone changes, mirroring and rotating | `-convmono -flip_x -flip_y -rotate90 -resize_en -resize_width= -resize_height= -input_gain= -hs= -hs_bp -hsrgb -gamma=` | ✅ |
@@ -60,7 +60,7 @@ The app is not code-signed yet, so Windows SmartScreen may show *"Windows protec
 | Import PIPP option files (`.pof`) | – | ✅ |
 | Viewer (SER Player style), night mode, English/German UI, list of recently opened files (0.28) | – | ✅ |
 | Dark/flat calibration: masters from SER, video, image or RAW series (average without the highest and lowest value), flat dark/bias, colour-neutral flats for Bayer data; applied before cropping and debayering; darks scaled to a different exposure, masters saved and loaded as FITS (0.28) | dark/flat | ✅ |
-| Reading FITS: single images (grey, Bayer, colour; 8/16/32 bit, float) with time and exposure from the header – also as darks/flats; cubes with many frames in one file (0.25) open like a video | FITS | ✅ |
+| Reading FITS: single images (grey, Bayer, colour; 8/16/32 bit, float) with time and exposure from the header – also as darks/flats; cubes with many frames in one file (0.25) open like a video; compressed FITS (`.fits.fz`: Rice, GZIP, quantised float, as from fpack and solar observatories such as NSO/GONG) (0.30) | FITS | ✅ |
 | Fujifilm X-Trans sensor data (uncompressed RAF, DNG) with own colour reconstruction; compressed CR3/RAF: Canon/Fuji do not publish the format – convert with the free Adobe DNG Converter | – | ✅ |
 | Surface stabilisation for lunar/solar close-ups without a full limb: every frame aligned to the first by its surface structure (own FFT, sub-pixel), frames without matching structure (clouds) rejected; optional anchor box drawn in the preview (0.24); reference follows slowly changing structure in long series, image rotation (field rotation) detected and corrected (0.28) | surface feature | ✅ |
 
@@ -80,7 +80,7 @@ npm test            # unit tests
 
 Without your own recordings: `npm run sample` creates `sample-jupiter.ser` (a synthetic planet with seeing).
 
-The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 49 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
+The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 51 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
 
 ## How it is built
 

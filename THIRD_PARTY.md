@@ -21,7 +21,7 @@ Not shipped, only called when present:
 
 Development only (not part of the app): Vite, TypeScript, Vitest, jpeg-js, pngjs, rea.
 
-Own implementations (no third-party code): SER reader/writer, AVI reader (RIFF/OpenDML), TIFF/DNG/CR2/ARW/CR3/RAF parsing, lossless-JPEG decoder (ITU-T T.81), debayer and X-Trans colour reconstruction, FITS reader (single images, cubes, extensions) and writer, 16-bit PNG/TIFF writer, limb fitting, HDR merge with sky model, FFT and surface alignment, dark/flat calibration, viewer.
+Own implementations (no third-party code): SER reader/writer, AVI reader (RIFF/OpenDML), TIFF/DNG/CR2/ARW/CR3/RAF parsing, lossless-JPEG decoder (ITU-T T.81), debayer and X-Trans colour reconstruction, FITS reader (single images, cubes, extensions; tiled image compression RICE_1/GZIP_1/GZIP_2 with quantised floats, written from the description in the FITS Standard 4.0, section 10) and writer, 16-bit PNG/TIFF writer, limb fitting, HDR merge with sky model, FFT and surface alignment, dark/flat calibration, viewer.
 
 ## Provenance of the camera RAW decoders
 

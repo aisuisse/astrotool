@@ -9,11 +9,15 @@
 //   gilt der Faktor des ersten Bildes für alle (sonst flackert die Helligkeit)
 // Zeilenfolge: ohne ROWORDER = 'TOP-DOWN' steht die unterste Zeile zuerst (FITS-Norm) – dann wird gespiegelt.
 // Mehrdeutig ist NAXIS3 = 3: ohne BAYERPAT gilt das als ein Farbbild, mit BAYERPAT als drei Rohbilder.
+// Komprimierte Bilder (.fits.fz, Kacheln in einer Binärtabelle): siehe fitscomp.ts.
 import type { ExifInfo } from "./exif";
+import { isTiledImage, readTiledPlane, tiledLayout, type TiledInfo } from "./fitscomp";
 import { SerColor, type Frame } from "./ser";
 import { msg } from "../i18n";
 
-export const FITS_EXT = /\.(fits?|fts)$/i;
+export const FITS_EXT = /\.(fits?|fts)(\.fz)?$|\.fz$/i;
+/** Dateiname ohne FITS-Endung (auch „.fits.fz“) */
+export const fitsBaseName = (name: string) => name.replace(/\.(fits?|fts)(\.fz)?$|\.fz$/i, "");
 
 export type FitsHeader = Map<string, string | number | boolean>;
 
@@ -101,6 +105,9 @@ export interface FitsImageHdu {
   planes: 1 | 3;
   /** Bilder in diesem Teil (Würfel: > 1) */
   frames: number;
+  /** komprimiertes Bild: Angaben zum Entpacken und Grösse der Tabelle samt Heap */
+  tiled?: TiledInfo;
+  dataBytes?: number;
 }
 
 /** Bildgeometrie eines Kopfs; null, wenn er keine Bilddaten hat (NAXIS < 2 oder eine Achse 0) */
@@ -139,11 +146,22 @@ export async function readFitsLayout(file: Blob): Promise<FitsImageHdu[]> {
     for (let a = 1; a <= naxis; a++) elems *= num(h, `NAXIS${a}`, 0);
     const bytes = (Math.abs(bitpix) / 8) * num(h, "GCOUNT", 1) * (num(h, "PCOUNT", 0) + elems);
     const dataOffset = offset + head.length;
-    const image = k === 0 || str(h, "XTENSION")?.toUpperCase() === "IMAGE";
-    const g = image ? imageGeometry(h) : null;
-    if (g) {
-      if (![8, 16, 32, -32, -64].includes(bitpix)) throw new Error(msg("fitsUnsupported", `BITPIX = ${bitpix}`));
-      out.push({ header: h, dataOffset, bitpix, ...g });
+    if (isTiledImage(h)) {
+      // komprimiertes Bild: Geometrie aus ZNAXISn, Werte beim Lesen entpackt
+      const t = tiledLayout(h);
+      const g = imageGeometry(t.header);
+      const zb = t.info.zbitpix;
+      if (g) {
+        if (![8, 16, 32, 64, -32, -64].includes(zb)) throw new Error(msg("fitsUnsupported", `ZBITPIX = ${zb}`));
+        out.push({ header: t.header, dataOffset, bitpix: zb, ...g, tiled: t.info, dataBytes: bytes });
+      }
+    } else {
+      const image = k === 0 || str(h, "XTENSION")?.toUpperCase() === "IMAGE";
+      const g = image ? imageGeometry(h) : null;
+      if (g) {
+        if (![8, 16, 32, -32, -64].includes(bitpix)) throw new Error(msg("fitsUnsupported", `BITPIX = ${bitpix}`));
+        out.push({ header: h, dataOffset, bitpix, ...g });
+      }
     }
     offset = dataOffset + Math.ceil(bytes / 2880) * 2880;
   }
@@ -158,18 +176,25 @@ export async function readFitsLayout(file: Blob): Promise<FitsImageHdu[]> {
 export async function decodeFitsFrame(file: Blob, hdu: FitsImageHdu, index: number, scale?: number): Promise<{ frame: Frame; scale: number }> {
   const { header: h, bitpix, width: w, height: ht, planes } = hdu;
   const plane = w * ht, count = plane * planes, bytes = Math.abs(bitpix) / 8;
+  const bzero = num(h, "BZERO", 0), bscale = num(h, "BSCALE", 1);
+  const blank = typeof h.get("BLANK") === "number" ? (h.get("BLANK") as number) : null;
+  let read: (i: number) => number;
+  if (hdu.tiled) {
+    // komprimiert: alle Werte dieses Bildes entpacken (fehlende als NaN)
+    const vals = await readTiledPlane(file, hdu.dataOffset, hdu.dataBytes ?? 0, hdu.tiled, index, planes);
+    read = (i) => vals[i];
+  } else {
   const start = hdu.dataOffset + index * count * bytes;
   const buf = await file.slice(start, start + count * bytes).arrayBuffer();
   if (buf.byteLength < count * bytes) throw new Error(msg("fitsBad"));
   const v = new DataView(buf);
-  const bzero = num(h, "BZERO", 0), bscale = num(h, "BSCALE", 1);
-  const blank = typeof h.get("BLANK") === "number" ? (h.get("BLANK") as number) : null;
-  const read: (i: number) => number =
+  read =
     bitpix === 8 ? (i) => v.getUint8(i)
     : bitpix === 16 ? (i) => v.getInt16(2 * i)
     : bitpix === 32 ? (i) => v.getInt32(4 * i)
     : bitpix === -32 ? (i) => v.getFloat32(4 * i)
     : (i) => v.getFloat64(8 * i);
+  }
   // physikalische Werte; fehlende (BLANK, NaN) als 0. Zweimal gelesen statt zwischengespeichert (grosse Bilder)
   const phys = (i: number) => {
     const r = read(i);

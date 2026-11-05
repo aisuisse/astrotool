@@ -2,7 +2,7 @@
 import { exifTimeMs, readExifBlob, type ExifInfo } from "./exif";
 import { SerColor, SerReader, type Frame } from "./ser";
 import { cropFrame } from "./image";
-import { decodeFitsFrame, FITS_EXT, fitsExif, fitsFrameCount, fitsNum, fitsStr, fitsTimeMs, readFitsHeader, readFitsLayout, type FitsImageHdu } from "./fits";
+import { decodeFitsFrame, FITS_EXT, fitsBaseName, fitsExif, fitsFrameCount, fitsNum, fitsStr, fitsTimeMs, readFitsHeader, readFitsLayout, type FitsImageHdu } from "./fits";
 import { msg } from "../i18n";
 
 export interface FrameSource {
@@ -104,9 +104,11 @@ export class ImageSequenceSource implements FrameSource {
     const entries: ImageEntry[] = [];
     for (const f of files) {
       // FITS: Zeit, Belichtung und Kamera aus dem FITS-Kopf statt aus EXIF
-      const fits = FITS_EXT.test(f.name) ? await readFitsHeader(f.file) : null;
-      const exif = fits ? fitsExif(fits.header) : await readExifBlob(f.file);
-      entries.push({ file: f.file, name: f.name.replace(/\.[^.]+$/, ""), exif, timeMs: exifTimeMs(exif), raw: f.raw });
+      // (Kopf des Bildteils – bei komprimierten Dateien steht DATE-OBS in der Erweiterung, nicht im Hauptkopf)
+      const isFitsFile = FITS_EXT.test(f.name);
+      const fits = isFitsFile ? await fitsImageHeader(f.file) : null;
+      const exif = fits ? fitsExif(fits) : await readExifBlob(f.file);
+      entries.push({ file: f.file, name: isFitsFile ? fitsBaseName(f.name) : f.name.replace(/\.[^.]+$/, ""), exif, timeMs: exifTimeMs(exif), raw: f.raw });
     }
     const allTimed = entries.every((e) => e.timeMs !== null);
     entries.sort((a, b) =>
@@ -170,6 +172,15 @@ export class ImageSequenceSource implements FrameSource {
   }
 }
 
+/** Kopf des ersten Bildteils einer FITS-Datei (oder des Hauptkopfs, wenn die Datei nicht lesbar ist) */
+async function fitsImageHeader(file: Blob) {
+  try {
+    return (await readFitsLayout(file))[0].header;
+  } catch {
+    return (await readFitsHeader(file))?.header ?? null;
+  }
+}
+
 /**
  * Mehrere Bilder in einer FITS-Datei (Würfel oder ein Bild je Erweiterung) – verhält sich wie ein SER-Video.
  * Zeitstempel: je Bildteil DATE-OBS; in einem Würfel gleichmässig verteilt bis DATE-END (ohne DATE-END keine
@@ -219,7 +230,7 @@ export class FitsCubeSource implements FrameSource {
     if (layout.some((u) => u.width !== g.width || u.height !== g.height || u.planes !== g.planes || u.bitpix !== g.bitpix))
       throw new Error(msg("fitsUnsupported", "HDU"));
     const { frame, scale } = await decodeFitsFrame(file, g, 0);
-    return new FitsCubeSource(file, name.replace(/\.[^.]+$/, ""), layout, frame, scale);
+    return new FitsCubeSource(file, fitsBaseName(name), layout, frame, scale);
   }
 
   frameName(i: number) {

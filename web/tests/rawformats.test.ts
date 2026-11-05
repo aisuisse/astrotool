@@ -130,6 +130,7 @@ describe.skipIf(!existsSync(`${RAW}/arw-lossy`))("Weitere RAW-Formate (lokale Te
   const cases: [string, string, number, number, number][] = [
     ["arw-lossy", "ARW compressed", 6000, 4000, SerColor.BAYER_RGGB], // Sony A7 III
     ["srw-nx300", "SRW compressed", 5472, 3648, SerColor.BAYER_GRBG], // Samsung NX300, Grösse = Kamerabild
+    ["srw-nx2000", "SRW compressed", 5472, 3648, SerColor.BAYER_GRBG], // Samsung NX2000 (Sensor 5536 breit), Grösse = Kamerabild
     ["srw-nx100", "SRW packed", 4614, 3070, SerColor.BAYER_BGGR], // Samsung NX100
     ["raf-bayer", "RAF uncompressed (Bayer)", 6000, 4000, SerColor.BAYER_RGGB], // Fujifilm X-A5
   ];
@@ -143,5 +144,15 @@ describe.skipIf(!existsSync(`${RAW}/arw-lossy`))("Weitere RAW-Formate (lokale Te
       v.sort((a, b) => a - b);
       expect(v[v.length >> 1]).toBeGreaterThan(1000);
       expect(v[v.length >> 1]).toBeLessThan(60000);
+    }, 60_000);
+});
+
+// Nicht unterstützte Sensoren: keine falschen Farben, sondern null (die App nimmt dann das Kamerabild)
+const MORE = ".testdata/raw-more";
+describe.skipIf(!existsSync(MORE))("Nicht unterstützte RAW (lokale Testdateien)", () => {
+  for (const dir of ["Fujifilm/FinePix%20X10", "Fujifilm/FinePix%20F550EXR", "Fujifilm/FinePix%20S5Pro", "Sony/DSLR-A100"])
+    it.skipIf(!existsSync(`${MORE}/${dir}`))(`${dir.split("/")[1].replace("%20", " ")}: nicht als Sensordaten gelesen`, async () => {
+      const f = `${MORE}/${dir}/${readdirSync(`${MORE}/${dir}`)[0]}`;
+      expect(await decodeRawData(await openAsBlob(f))).toBeNull();
     }, 60_000);
 });
