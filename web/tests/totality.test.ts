@@ -3,7 +3,7 @@ import { toLum } from "../src/engine/image";
 import { SerColor, type Frame } from "../src/engine/ser";
 import { bracketGroups, fitMoonDisc, fitMoonInPartial, fitSkyModel, mergeHdr } from "../src/engine/totality";
 import { fitSunDisc } from "../src/engine/limb";
-import { defaultOptions, detect, processSource, rejectSunInsideTotality, type FrameResult, type ProcessOptions } from "../src/engine/pipeline";
+import { defaultOptions, detect, processSource, rejectRadiusOutliers, rejectSunInsideTotality, rejectSunNearTotality, type FrameResult, type ProcessOptions } from "../src/engine/pipeline";
 import { ImageSequenceSource } from "../src/engine/source";
 import { exifApp1, expose, partialImage, totalityRadiance, withExif, type Geometry } from "../scripts/totality-model.mjs";
 
@@ -234,6 +234,60 @@ describe("Plausibilität in der Totalität", () => {
     const t = (min: number) => 621_355_968_000_000_000n + BigInt(min * 60) * 10_000_000n;
     rejectSunInsideTotality(r, BigInt64Array.from([t(0), t(30), t(60)]));
     expect(r[1].accepted).toBe(true);
+  });
+});
+
+describe("Sonnenrand nahe der Totalität", () => {
+  // Zeit in Sekunden; Sonne r = 196, Mond in der Totalität r = 180 (mit Blendung am Rand etwas zu klein gemessen)
+  const t = (s: number) => 621_355_968_000_000_000n + BigInt(Math.round(s * 10)) * 1_000_000n;
+  const fr = (index: number, kind: "sun" | "moon", r: number, vis = 0.8): FrameResult => ({
+    index, accepted: true, score: 0,
+    det: { found: true, cx: 0, cy: 0, x0: 0, y0: 0, x1: 0, y1: 0, size: 0, threshold: 0, maxValue: 1, touchesEdge: false, overexposed: 0, disc: { cx: 0, cy: 0, r, visibleLimb: vis, rms: 1, kind } },
+  });
+  /** Teilphasen alle 5 min, Totalität 4 min mit Mondrand, davor und danach Sichel/Diamantring */
+  function series(nearSun: [number, number, number][]) {
+    const items: { t: number; kind: "sun" | "moon"; r: number; vis: number }[] = [];
+    for (let k = 0; k < 8; k++) items.push({ t: -2400 + k * 300, kind: "sun", r: 196 + (k % 2) * 0.6, vis: 0.6 });
+    for (let k = 0; k < 12; k++) items.push({ t: 10 + k * 20, kind: "moon", r: 180 + (k % 3) * 0.5, vis: 0.9 });
+    for (const [s, r, vis] of nearSun) items.push({ t: s, kind: "sun", r, vis });
+    for (let k = 0; k < 8; k++) items.push({ t: 600 + k * 300, kind: "sun", r: 196 - (k % 2) * 0.6, vis: 0.6 });
+    items.sort((a, b) => a.t - b.t);
+    return { res: items.map((x, i) => fr(i, x.kind, x.r, x.vis)), stamps: BigInt64Array.from(items.map((x) => t(x.t))), items };
+  }
+
+  it("verwirft überstrahlte Ränder kurz vor und nach der Totalität (Korona-Ring, Sichel, Diamantring)", () => {
+    const { res, stamps, items } = series([[-20, 189, 0.06], [-5, 196.5, 0.3], [252, 256, 0.85], [254, 258, 0.87], [256, 257, 0.86], [270, 210, 0.78], [300, 197, 0.4]]);
+    rejectSunNearTotality(res, stamps);
+    const at = (s: number) => res[items.findIndex((x) => x.t === s)];
+    expect(at(-20).accepted).toBe(false); // Sichel 3.6 % zu klein
+    expect(at(-20).reason).toContain("nearTotality");
+    expect(at(-5).accepted).toBe(true); // passt
+    for (const s of [252, 254, 256, 270]) expect(at(s).accepted).toBe(false);
+    expect(at(300).accepted).toBe(true);
+    // Mondränder und die Teilphasen weiter weg bleiben
+    expect(res.filter((r) => r.det.disc!.kind === "moon").every((r) => r.accepted)).toBe(true);
+    expect(items.filter((x) => Math.abs(x.t) > 400 && x.t < 600 + 2400).every((x) => at(x.t).accepted)).toBe(true);
+  });
+
+  it("vor der Nachbarprüfung: falsche Ränder in einer Gruppe verdrängen die Mondränder danach nicht mehr", () => {
+    const { res, stamps } = series([[252, 256, 0.85], [253, 257, 0.85], [254, 258, 0.86], [255, 256, 0.85], [256, 259, 0.85], [257, 257, 0.86]]);
+    // die Gruppe liegt mitten unter den letzten Mondbildern
+    rejectSunNearTotality(res, stamps);
+    rejectRadiusOutliers(res);
+    expect(res.filter((r) => r.det.disc!.kind === "moon").every((r) => r.accepted)).toBe(true);
+    expect(res.filter((r) => r.det.disc!.r > 250).some((r) => r.accepted)).toBe(false);
+  });
+
+  it("ohne Totalität (nur Teilphasen) und ohne Zeiten bleibt alles", () => {
+    const sun = Array.from({ length: 10 }, (_, i) => fr(i, "sun", i === 4 ? 180 : 196));
+    rejectSunNearTotality(sun, null);
+    expect(sun.every((r) => r.accepted)).toBe(true);
+  });
+
+  it("ohne gut sichtbare Sonne: Mond als Mass, nur grobe Fehler", () => {
+    const r = [fr(0, "sun", 300, 0.9), fr(1, "sun", 192, 0.3), fr(2, "moon", 180), fr(3, "moon", 181), fr(4, "moon", 180), fr(5, "sun", 140, 0.2)];
+    rejectSunNearTotality(r, null);
+    expect(r.map((x) => x.accepted)).toEqual([false, true, true, true, true, false]);
   });
 });
 

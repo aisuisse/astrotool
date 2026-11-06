@@ -439,6 +439,49 @@ export function estimateSunInTotality(results: FrameResult[], stamps: BigInt64Ar
 }
 
 /**
+ * Kurz vor und nach der Totalität (dünne Sichel, Perlschnur, Diamantring) ist vom Sonnenrand nur ein kurzes,
+ * überstrahltes Stück übrig; die Anpassung trifft dann oft den Rand der Blendung oder der inneren Korona. Echte
+ * Serien: Ø 512 statt 392 px kurz vor dem 3. Kontakt (überbelichtete innere Korona um den Mond), Sichel mit 4 %
+ * zu kleinem Radius, Diamantring mit 2.5 % zu grossem. Solche Ränder müssen zur gut sichtbaren Sonne derselben
+ * Serie passen: Vergleich mit den zeitlich nächsten Bildern, in denen mindestens 40 % des Rands sichtbar sind
+ * (der Radius ändert sich tief am Horizont durch die Lichtbrechung langsam, deshalb die nächsten – und von beiden
+ * Seiten der Totalität, sonst hinkt der Vergleichswert bei sinkender Sonne nach: Diamantring 3 % zu gross).
+ * Ohne solche Bilder dient der Mond als Mass (er ist in der Totalität 0–7 % grösser als die Sonne, erscheint
+ * mit Blendung am Rand aber bis 10 % kleiner).
+ */
+export function rejectSunNearTotality(results: FrameResult[], stamps: BigInt64Array | null, windowMinutes = 3, tolerance = 0.02): void {
+  const tOf = (r: FrameResult) => (stamps ? Number(stamps[r.index] - stamps[0]) / 1e7 : r.index);
+  const win = stamps ? windowMinutes * 60 : 5;
+  const moons = results.filter((r) => r.accepted && r.det.disc?.kind === "moon");
+  if (moons.length < 2) return;
+  // nur Mondränder, die untereinander passen (falsche „Monde“ in Blendung zählen nicht)
+  const mr = moons.map((r) => r.det.disc!.r).sort((a, b) => a - b);
+  const moonMed = mr[mr.length >> 1];
+  const moonT = moons.filter((r) => Math.abs(r.det.disc!.r - moonMed) <= 0.1 * moonMed).map(tOf);
+  if (moonT.length < 2) return;
+  const near = (t: number) => moonT.some((m) => Math.abs(m - t) <= win);
+  const suns = results.filter((r) => r.accepted && r.det.disc?.kind === "sun");
+  const good = suns.filter((r) => r.det.disc!.visibleLimb >= 0.4 && !near(tOf(r)));
+  for (const res of suns) {
+    const t = tOf(res);
+    if (!near(t)) continue;
+    const r = res.det.disc!.r;
+    const ref = good
+      .map((g) => ({ d: Math.abs(tOf(g) - t), r: g.det.disc!.r }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 7)
+      .map((g) => g.r)
+      .sort((a, b) => a - b);
+    const sunR = ref.length >= 3 ? ref[ref.length >> 1] : null;
+    const bad = sunR !== null ? Math.abs(r - sunR) > tolerance * sunR : r > 1.25 * moonMed || r < 0.8 * moonMed;
+    if (bad) {
+      res.accepted = false;
+      res.reason = msg("nearTotality", Math.round(2 * r), Math.round(2 * (sunR ?? moonMed)));
+    }
+  }
+}
+
+/**
  * Die Totalität ist ein zusammenhängender Zeitraum (höchstens 7.5 min). Ein „Sonnenrand“ zwischen zwei Bildern
  * mit Mondrand kann nicht stimmen – meist ein sehr dunkles Bild (Perlschnur) oder Blendung –, also verwerfen.
  */
@@ -527,6 +570,9 @@ export async function processSource(
   }
   const stamps = await src.readTimestamps();
   if (o.centreMode === "disc" && o.checkObject) {
+    // zuerst die Bilder rund um die Totalität: falsche Ränder dort liegen oft dicht beisammen, bestätigen sich in
+    // der Nachbarprüfung gegenseitig und verdrängen sonst die richtigen Mondrand-Bilder
+    rejectSunNearTotality(results, stamps);
     rejectRadiusOutliers(results);
     rejectSunInsideTotality(results, stamps);
     if (o.totalitySunCentre) estimateSunInTotality(results, stamps);
