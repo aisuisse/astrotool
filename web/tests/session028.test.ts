@@ -147,7 +147,7 @@ describe("Oberfläche: Referenz nachführen", () => {
       worst = Math.max(worst, Math.abs(r.angle! / deg - k), Math.abs(r.dx - 0.4 * k), Math.abs(r.dy + 0.3 * k));
     }
     expect(worst).toBeLessThan(0.5);
-  });
+  }, 30_000); // 12 Drehungssuchen: gut 5 s, unter Last mehr
 
   it("Struktur wandelt sich langsam (Granulation): mit Nachführen bleibt die Lage genau", () => {
     const tex2 = moonSurface(23, 1400, 260);

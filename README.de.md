@@ -12,7 +12,7 @@ Einsatzgebiete:
 - **Mond und Sonne** – Vollscheibe zentrieren, Oberflächen-Ausschnitte stabilisieren (0.22).
 - **Sonnenfinsternisse** – Bildserien über alle Phasen ausrichten und die Sonnenscheibe auch bei schmaler Sichel sauber zentrieren (Kreis am Sonnenrand statt Helligkeits-Schwerpunkt); Aufnahmezeiten bleiben erhalten. Daraus direkt einen Zeitraffer mit eingeblendeter Uhrzeit erstellen; Phasenmontagen folgen.
 - **WinJUPOS** – Dateinamen mit der Aufnahmezeit in UT, direkt für die Derotation (0.29).
-- **Ganze Beobachtungsabende** – viele SER/AVI-Aufnahmen auf einmal, jede mit denselben Einstellungen in einen Ordner, mit WinJUPOS-Namen – oder zu einer Serie zusammengefügt (0.31).
+- **Ganze Beobachtungsabende** – viele SER/AVI-Aufnahmen oder ein Ordner mit Bildserien auf einmal, jede mit denselben Einstellungen in einen Ordner, mit WinJUPOS-Namen – oder Aufnahmen zu einer Serie zusammengefügt (0.31, Bildserien 0.32).
 - **ISS-Transits, Animationen** – wie bei PIPP (geplant).
 
 Die Verarbeitung läuft lokal – als Windows-App oder im Browser.
@@ -54,7 +54,7 @@ Tests: `npm test` · Produktions-Build: `npm run build` (Ausgabe in `web/dist`, 
 | Beste N / beste % behalten, Reihenfolge | `-q= -qpcnt= -nr` | ✅ |
 | SER schreiben (Zeitstempel bleiben erhalten) | `-ser` | ✅ |
 | **WinJUPOS-Dateinamen:** Aufnahmezeit in UT mit Zehntelminute, Beobachterkürzel, weitere Angaben; Video nach Beginn, Mitte oder Ende benannt; Zeit aus der Datei, dem SER-Kopf oder dem Dateinamen, verschiebbar | `-wjpos_*` | ✅ 0.29 |
-| **Stapel:** mehrere SER-/AVI-/Video-Aufnahmen in einem Durchgang mit denselben Einstellungen, je eine Ausgabe in einen gewählten Ordner (SER-Datei oder Unterordner mit Einzelbildern, dazu Zeitraffer/Montage), Übersichtstabelle; oder **zusammengefügt** zu einer Serie, beste Bilder aus allen | mehrere Eingaben, `-join` | ✅ 0.31 |
+| **Stapel:** mehrere SER-/AVI-/Video-Aufnahmen in einem Durchgang mit denselben Einstellungen, je eine Ausgabe in einen gewählten Ordner (SER-Datei oder Unterordner mit Einzelbildern, dazu Zeitraffer/Montage), Übersichtstabelle; oder **zusammengefügt** zu einer Serie, beste Bilder aus allen. **Ordner öffnen** (oder Ordner hineinziehen): jeder Unterordner mit Bildern wird eine Bildserie des Stapels, jedes Video eine Aufnahme; andere Dateien werden übergangen (0.32) | mehrere Eingaben, `-join` | ✅ 0.31/0.32 |
 | Bildserien (JPG, PNG, TIFF) mit Sortierung nach EXIF-Aufnahmezeit | – | ✅ |
 | **Kamera-RAW:** Sensordaten (16 bit, linear, Bayer) von DNG, Canon CR2, Sony ARW (verlustfrei, verlustbehaftet „cRAW“ und unkomprimiert – 0.27), Nikon NEF (komprimiert), Samsung SRW (NX1/NX500, NX300-Familie mit NX300M und NX2000, NX100-Familie – 0.27/0.30), Fujifilm RAF unkomprimiert mit Bayer-Sensor (z. B. X-A5, 0.27) und mit X-Trans-Muster, auch als DNG (0.21, eigene Farbrekonstruktion); für CR3, komprimierte RAF, ORF, RW2 … das eingebettete Kamerabild in voller Grösse. Weissabgleich automatisch aus dem Kamerabild, Aufnahmedaten aus EXIF | – | ✅ 0.11 |
 | **Finsternis-Modus:** Zentrieren per Kreis am Sonnenrand, auch bei schmaler Sichel | – (neu) | ✅ |

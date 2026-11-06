@@ -19,6 +19,10 @@
           <span data-i18n="btn.open">Open</span>
           <input id="file" type="file" accept=".ser,.avi,.mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden />
         </label>
+        <label class="btn" title="A folder with sub-folders: every sub-folder of images and every video becomes one recording of a batch" data-i18n-title="btn.openFolderTitle">
+          <span data-i18n="btn.openFolder">Open folder</span>
+          <input id="folderIn" type="file" webkitdirectory multiple hidden />
+        </label>
         <div id="recentWrap" class="recentWrap" hidden>
           <button id="recentBtn" class="btn" aria-haspopup="true" aria-expanded="false" data-i18n="recent.btn">Recent ▾</button>
           <div id="recentMenu" class="recentMenu" role="menu" hidden></div>

@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 const args = process.argv.slice(2);
 const exe = args[0], outDir = args[1] && resolve(args[1]);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
-const smallSer = opt("--ser"), imageDir = opt("--images"), bigSer = opt("--big"), totalityDir = opt("--totality"), aviDir = opt("--avi"), rawDir = opt("--raw"), calDir = opt("--cal"), fitsDir = opt("--fits"), fitsCube = opt("--fitscube"), surfaceSer = opt("--surface"), fzDir = opt("--fz"), batchDir = opt("--batch");
+const smallSer = opt("--ser"), imageDir = opt("--images"), bigSer = opt("--big"), totalityDir = opt("--totality"), aviDir = opt("--avi"), rawDir = opt("--raw"), calDir = opt("--cal"), fitsDir = opt("--fits"), fitsCube = opt("--fitscube"), surfaceSer = opt("--surface"), fzDir = opt("--fz"), batchDir = opt("--batch"), imgBatchDir = opt("--imgbatch");
 if (!exe || !outDir || !smallSer || !imageDir) {
   console.error("Aufruf: node scripts/app-fulltest.mjs <astrotool.exe> <ausgabeordner> --ser <klein.ser> --images <bilderordner> [--big <gross.ser>]");
   process.exit(2);
@@ -731,6 +731,41 @@ try {
       try { await (await navigator.storage.getDirectory()).removeEntry('stapel-test', { recursive: true }); } catch {}
       return true; })()`);
     return { saved, text: r.text.slice(0, 300), joined: ser };
+  });
+
+  // ---------- Stapel aus einem Ordner: je Unterordner eine Bildserie (dazu fremde Dateien, die übergangen werden) ----------
+  if (imgBatchDir) await test("Stapel aus Ordner: 2 Bildserien (Unterordner) → je ein Unterordner mit PNG", async () => {
+    const subs = readdirSync(imgBatchDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+    const count = (s) => readdirSync(join(imgBatchDir, s)).filter((f) => /\.jpe?g$/i.test(f)).length;
+    await setFiles("#folderIn", [imgBatchDir]);
+    await waitFor(`!document.getElementById('batchRow').hidden && !document.getElementById('modeTabs').hidden && /\\d/.test(document.getElementById('info').innerText)`, 120_000, "Ordner öffnen");
+    await sleep(1500);
+    const row = await ev(`({ title: document.getElementById('batchTitle').innerText, run: document.getElementById('run').innerText, list: [...document.querySelectorAll('#batchList li')].map((l) => l.textContent), join: document.getElementById('batchJoin').closest('label').hidden, format: document.getElementById('format').value })`);
+    check(row.list.length === subs.length && subs.every((s, i) => row.list[i].startsWith(`${s}/`) && row.list[i].includes(String(count(s)))) && row.join && row.format === "png" && new RegExp(String(subs.length)).test(row.run), `Stapel-Anzeige: ${JSON.stringify(row)}`);
+    await processMode();
+    await ev(`document.querySelector('[data-preset="eclipse"]').click(); true`);
+    await sleep(800);
+    await ev(`(async () => {
+      const root = await navigator.storage.getDirectory();
+      try { await root.removeEntry('ordner-test', { recursive: true }); } catch {}
+      window.__ordner = await root.getDirectoryHandle('ordner-test', { create: true });
+      window.__origDir = window.showDirectoryPicker;
+      window.showDirectoryPicker = async () => window.__ordner;
+      __t.set('#format', 'png'); __t.set('[data-tl="enabled"]', false);
+      return true; })()`);
+    const r = await runAndWait(600_000);
+    const all = await ev(`(async () => { const out = []; for await (const [n, h] of window.__ordner.entries()) { if (h.kind !== 'directory') { out.push({ n }); continue; } let png = 0, other = 0; for await (const [m] of h.entries()) /\\.png$/i.test(m) ? png++ : other++; out.push({ n, png, other, dir: true }); } return out.sort((a, b) => a.n.localeCompare(b.n)); })()`);
+    const saved = all.filter((s) => s.dir), loose = all.filter((s) => !s.dir).map((s) => s.n);
+    const rejected = [...r.text.matchAll(/(\d+) (rejected|verworfen)/g)].map((m) => Number(m[1]));
+    check(saved.length === subs.length && subs.every((s, i) => saved[i].n === `${s}_astro` && saved[i].png + (rejected[i] ?? 0) === count(s) && saved[i].png > 0), `Ordner: ${JSON.stringify(all)} / ${r.text.slice(0, 300)}`);
+    // Montagen (Finsternis-Vorgabe) nach dem Ordner benannt
+    check(loose.every((n) => subs.some((s) => n.startsWith(`${s}_`))), `Dateien im Ordner: ${JSON.stringify(loose)}`);
+    check(new RegExp(`${subs.length} (of|von) ${subs.length}`).test(r.text), `Ergebnis: ${r.text.slice(0, 200)}`);
+    await ev(`(async () => {
+      window.showDirectoryPicker = window.__origDir;
+      try { await (await navigator.storage.getDirectory()).removeEntry('ordner-test', { recursive: true }); } catch {}
+      return true; })()`);
+    return { list: row.list, saved, text: r.text.slice(0, 300) };
   });
 
   if (fzDir) await test("FITS komprimiert (.fits.fz): GONG-Finsternis, Sonnenrand → PNG", async () => {

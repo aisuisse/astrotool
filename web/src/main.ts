@@ -9,6 +9,7 @@ import { initTools, isDesktopApp } from "./tools";
 import { initPlayer } from "./player";
 import { filesOf, forgetRecent, recentList, recentSupported, rememberRecent, type RecentEntry } from "./recent";
 import type { CalKind, FileInfo, FromWorker, OutputFormat, ToWorker } from "./worker";
+import { groupBatch, VIDEO_RE, type BatchItem, type PickedFile } from "./batchgroups";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -274,31 +275,48 @@ syncMontage();
 );
 
 // ---------- Datei öffnen ----------
-let lastFiles: File[] = [];
+let lastPicked: PickedFile[] = [];
+/** nach dem nächsten Öffnen das passende Ausgabeformat vorschlagen (nicht während eines Stapels) */
+let resetFormat = false;
 // RAW: Rohdaten oder Kamerabild – Serie neu einlesen
 $<HTMLSelectElement>("rawMode").addEventListener("change", () => {
-  if (lastFiles.length && info?.raw) openFiles(lastFiles);
+  if (lastPicked.length && info?.raw) openPicked(lastPicked);
 });
-const VIDEO_RE = /\.(ser|avi|mp4|m4v|mov|mkv|webm)$/i;
 function openFiles(list: FileList | File[] | null | undefined) {
-  const files = Array.from(list ?? []);
-  if (!files.length) return;
-  const sers = files.filter((f) => VIDEO_RE.test(f.name));
-  if (sers.length && sers.length < files.length) {
+  openPicked(Array.from(list ?? []).map((f) => ({ file: f, path: f.webkitRelativePath || f.name })));
+}
+/**
+ * Dateien öffnen. Aus einem Ordner (Pfade mit "/"): jedes Video und jeder Ordner mit Bildern ist eine Aufnahme –
+ * mehr als eine ergibt einen Stapel. Einzeln gewählt: mehrere Videos = Stapel, mehrere Bilder = eine Bildserie.
+ */
+function openPicked(picked: PickedFile[]) {
+  if (!picked.length) return;
+  const fromFolder = picked.some((p) => p.path.includes("/"));
+  const files = picked.map((p) => p.file);
+  const videos = files.filter((f) => VIDEO_RE.test(f.name));
+  if (!fromFolder && videos.length && videos.length < files.length) {
     showError(L("err.mixed"));
+    return;
+  }
+  const items = fromFolder || videos.length > 1 ? groupBatch(picked) : [];
+  if (fromFolder && !items.length) {
+    showError(L("err.emptyFolder"));
     return;
   }
   showError(null);
   $("result").hidden = true;
   $("drop").querySelector("strong")!.textContent = L("drop.reading");
-  lastFiles = files;
-  // Mehrere SER/Videos: Stapel (jede einzeln) oder zusammengefügt
-  if (sers.length > 1) {
-    batch = { files: [...sers].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })), join: $<HTMLInputElement>("batchJoin").checked };
-    sendOpen(batch.join ? batch.files : [batch.files[0]], batch.join);
+  lastPicked = picked;
+  resetFormat = true;
+  if (items.length > 1) {
+    // Stapel: jede Aufnahme einzeln – oder (nur Videos) zusammengefügt
+    const canJoin = items.every((i) => i.kind === "video");
+    batch = { items, join: canJoin && $<HTMLInputElement>("batchJoin").checked, canJoin };
+    batchCurrent = 0;
+    sendOpen(batch.join ? items.flatMap((i) => i.files) : items[0].files, batch.join);
   } else {
     batch = null;
-    sendOpen(files);
+    sendOpen(items.length ? items[0].files : files);
   }
   renderBatch();
 }
@@ -307,8 +325,8 @@ function sendOpen(files: File[], join = false) {
 }
 
 // ---------- Stapel: mehrere Aufnahmen (wie PIPP) ----------
-/** Mehrere SER/Videos geöffnet; join = als eine Serie */
-let batch: { files: File[]; join: boolean } | null = null;
+/** Mehrere Aufnahmen geöffnet (Videos, Bildserien je Ordner); join = als eine Serie (nur Videos) */
+let batch: { items: BatchItem[]; join: boolean; canJoin: boolean } | null = null;
 /** läuft gerade ein Stapel? Dann gehen Meldungen des Workers an diesen Empfänger */
 let batchWait: ((m: FromWorker) => void) | null = null;
 let batchCancel = false;
@@ -321,16 +339,19 @@ function renderBatch() {
   row.hidden = !batch;
   if (!batch) { updateRunLabel(); return; }
   $<HTMLInputElement>("batchJoin").checked = batch.join;
-  $("batchTitle").textContent = L("batch.title", batch.files.length);
-  $("batchHint").textContent = batch.join ? L("batch.hintJoin", info?.frameCount ?? "…") : L("batch.hint", batch.files[batchCurrent]?.name ?? "");
-  $("batchList").replaceChildren(...batch.files.map((f, i) => Object.assign(document.createElement("li"), { textContent: f.name, className: !batch!.join && i === batchCurrent ? "cur" : "" })));
+  ($("batchJoin").closest("label") as HTMLElement).hidden = !batch.canJoin;
+  $("batchTitle").textContent = L("batch.title", batch.items.length);
+  $("batchHint").textContent = batch.join ? L("batch.hintJoin", info?.frameCount ?? "…") : L("batch.hint", batch.items[batchCurrent]?.name ?? "");
+  $("batchList").replaceChildren(...batch.items.map((it, i) => Object.assign(document.createElement("li"), { textContent: itemLabel(it), className: !batch!.join && i === batchCurrent ? "cur" : "" })));
   updateRunLabel();
 }
+/** Eintrag in der Stapel-Liste: Videoname, bei Bildserien Ordner und Anzahl der Bilder */
+const itemLabel = (it: BatchItem) => (it.kind === "images" ? `${it.name}/ (${L("batch.images", it.files.length)})` : it.name);
 $<HTMLInputElement>("batchJoin").addEventListener("change", (e) => {
   if (!batch || busy) return;
   batch.join = (e.target as HTMLInputElement).checked;
   batchCurrent = 0;
-  sendOpen(batch.join ? batch.files : [batch.files[0]], batch.join);
+  sendOpen(batch.join ? batch.items.flatMap((i) => i.files) : batch.items[0].files, batch.join);
   renderBatch();
 });
 const isBatch = () => !!batch && !batch.join;
@@ -354,7 +375,7 @@ async function writeBlob(dir: FileSystemDirectoryHandle, name: string, blob: Blo
 }
 
 async function runBatch(format: OutputFormat) {
-  const files = batch!.files;
+  const items = batch!.items;
   const t0 = performance.now();
   let folder: FileSystemDirectoryHandle | undefined;
   if ("showDirectoryPicker" in window) {
@@ -367,14 +388,14 @@ async function runBatch(format: OutputFormat) {
   }
   batchCancel = false;
   const rows: BatchRow[] = [];
-  for (let i = 0; i < files.length && !batchCancel; i++) {
-    const f = files[i], row: BatchRow = { name: f.name, saved: [], links: [] };
+  for (let i = 0; i < items.length && !batchCancel; i++) {
+    const it = items[i], row: BatchRow = { name: itemLabel(it), saved: [], links: [] };
     rows.push(row);
     batchCurrent = i;
     renderBatch();
-    $("batchLabel").textContent = L("batch.progress", i + 1, files.length, f.name);
+    $("batchLabel").textContent = L("batch.progress", i + 1, items.length, it.name);
     const wait = nextMessage((m) => m.type === "opened" || m.type === "error");
-    sendOpen([f]);
+    sendOpen(it.files);
     const op = await wait;
     if (op.type === "error") { row.error = M(op.message); continue; }
     if (batchCancel) break;
@@ -382,12 +403,14 @@ async function runBatch(format: OutputFormat) {
       // Ziel im Ordner: SER als Datei, Einzelbilder in einen Unterordner je Aufnahme
       let target: FileSystemFileHandle | undefined, sub: FileSystemDirectoryHandle | undefined;
       const wj = options.winjupos ? winjuposExample(format === "ser" ? "ser" : "zip") : null;
+      // Bildserie: nach ihrem Ordner benannt (der Name aus erstem und letztem Bild sagt wenig)
+      const base = it.kind === "images" && it.name ? it.name : info!.name;
       if (folder && format === "ser") {
-        const name = wj ?? `${info!.name}_astro.ser`;
+        const name = wj ?? `${base}_astro.ser`;
         target = await folder.getFileHandle(name, { create: true });
         row.saved.push(name);
       } else if (folder && isImageFormat(format)) {
-        const name = wj ? wj.replace(/\.zip$/, "") : `${info!.name}_astro`;
+        const name = wj ? wj.replace(/\.zip$/, "") : `${base}_astro`;
         sub = await folder.getDirectoryHandle(name, { create: true });
         row.saved.push(`${name}/`);
       }
@@ -408,6 +431,8 @@ async function runBatch(format: OutputFormat) {
       if (d.timelapse) blobs.push({ name: d.timelapse.fileName, blob: d.timelapse.blob });
       if (d.montage) blobs.push({ name: d.montage.fileName, blob: d.montage.blob });
       for (const b of blobs) {
+        // Bildserie: Zeitraffer/Montage wie der Ordner benennen ("Serie1_montage.png")
+        if (base !== info!.name && b.name.startsWith(info!.name)) b.name = base + b.name.slice(info!.name.length);
         if (folder) {
           await writeBlob(folder, b.name, b.blob);
           row.saved.push(b.name);
@@ -419,7 +444,7 @@ async function runBatch(format: OutputFormat) {
   }
   const cancelled = batchCancel;
   batchWait = null;
-  lastBatch = { rows, total: files.length, seconds: (performance.now() - t0) / 1000, cancelled, folder: !!folder };
+  lastBatch = { rows, total: items.length, seconds: (performance.now() - t0) / 1000, cancelled, folder: !!folder };
   finish();
   renderBatchResult();
 }
@@ -516,6 +541,34 @@ if (recentSupported) {
 $<HTMLInputElement>("file").addEventListener("change", (e) => {
   openFiles((e.target as HTMLInputElement).files);
 });
+// Ordner öffnen: Unterordner mit Bildern und Videos werden zu einem Stapel
+$<HTMLInputElement>("folderIn").addEventListener("change", (e) => {
+  const input = e.target as HTMLInputElement;
+  pendingHandles = null;
+  openFiles(input.files);
+  input.value = "";
+});
+
+/** Hineingezogene Ordner durchgehen (alle Ebenen); Pfad relativ zur Ablage, z. B. "Abend/Serie1/IMG_1.jpg" */
+async function readDropped(entries: FileSystemEntry[]): Promise<PickedFile[]> {
+  const out: PickedFile[] = [];
+  const walk = async (en: FileSystemEntry): Promise<void> => {
+    if (en.isFile) {
+      const file = await new Promise<File>((res, rej) => (en as FileSystemFileEntry).file(res, rej));
+      out.push({ file, path: en.fullPath.replace(/^\//, "") });
+    } else if (en.isDirectory) {
+      const reader = (en as FileSystemDirectoryEntry).createReader();
+      // readEntries liefert in Teilen, bis eine leere Liste kommt
+      for (;;) {
+        const part = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
+        if (!part.length) break;
+        for (const p of part) await walk(p);
+      }
+    }
+  };
+  for (const en of entries) await walk(en);
+  return out;
+}
 
 const drop = $("drop");
 for (const target of [drop, document.body]) {
@@ -527,6 +580,14 @@ for (const target of [drop, document.body]) {
   target.addEventListener("drop", (e) => {
     e.preventDefault();
     drop.classList.remove("over");
+    // Ordner hineingezogen: Einträge gleich im Ereignis holen (später sind sie leer), dann durchgehen
+    const entries = [...(e.dataTransfer?.items ?? [])].filter((i) => i.kind === "file").map((i) => i.webkitGetAsEntry?.() ?? null);
+    if (entries.some((en) => en?.isDirectory)) {
+      pendingHandles = null;
+      $("drop").querySelector("strong")!.textContent = L("drop.reading");
+      void readDropped(entries.filter((en): en is FileSystemEntry => !!en)).then(openPicked, (err) => showError(String(err)));
+      return;
+    }
     // Handles gleich im Ereignis anfordern (später sind die Einträge leer) – für „Zuletzt geöffnet“
     if (recentSupported && e.dataTransfer) {
       const items = [...e.dataTransfer.items].filter((i) => i.kind === "file");
@@ -819,7 +880,7 @@ const toFolder = $<HTMLInputElement>("toFolder");
 if (!("showDirectoryPicker" in window && "showSaveFilePicker" in window)) $("folderRow").hidden = true;
 function updateRunLabel() {
   const f = formatSel.value as OutputFormat;
-  $("run").textContent = isBatch() ? L("batch.run", batch!.files.length) : f === "ser" || f === "none" ? L(f === "ser" ? "run.ser" : "run.none") : L("run.image", L(`fmt.${f}`));
+  $("run").textContent = isBatch() ? L("batch.run", batch!.items.length) : f === "ser" || f === "none" ? L(f === "ser" ? "run.ser" : "run.none") : L("run.image", L(`fmt.${f}`));
   toFolder.disabled = f === "none";
   const lbl = $("toFolderLabel"), key = f === "ser" ? "opt.toFile" : "opt.toFolder";
   lbl.dataset.i18n = key; // bleibt beim Sprachwechsel richtig
@@ -966,8 +1027,9 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       sendCalUse();
       lastPreview = null;
       lastDone = null;
-      // im Stapel bleibt das gewählte Format
-      if (!batch) formatSel.value = info.kind === "images" ? "png" : "ser";
+      // nach dem Öffnen passendes Format vorschlagen; im laufenden Stapel bleibt das gewählte
+      if (resetFormat && !batchWait) formatSel.value = info.kind === "images" ? "png" : "ser";
+      resetFormat = false;
       updateRunLabel();
       syncEdit();
       if (batch) renderBatch();
