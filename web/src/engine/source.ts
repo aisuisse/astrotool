@@ -265,3 +265,81 @@ export class FitsCubeSource implements FrameSource {
     return BigInt64Array.from(out.map(msToTicks));
   }
 }
+
+/**
+ * Mehrere Aufnahmen (SER, AVI, Video) als eine Serie – wie PIPP mit -join. Alle müssen gleich gross sein und
+ * dieselbe Farbart und Bittiefe haben. Bildnamen behalten die Namen der einzelnen Dateien; Zeitstempel nur, wenn
+ * jede Datei welche hat.
+ */
+export class JoinedSource implements FrameSource {
+  readonly kind: FrameSource["kind"];
+  readonly width: number;
+  readonly height: number;
+  readonly colorId: number;
+  readonly bitDepth: number;
+  readonly frameCount: number;
+  readonly clock: "utc" | "local";
+  readonly linear?: boolean;
+  readonly fps?: number | null;
+  meta: FrameSource["meta"];
+  /** erstes Bild jeder Quelle in der gemeinsamen Zählung */
+  private readonly starts: number[] = [];
+
+  constructor(readonly parts: FrameSource[]) {
+    const a = parts[0];
+    if (!a) throw new Error(msg("noFile"));
+    for (const p of parts)
+      if (p.width !== a.width || p.height !== a.height || p.colorId !== a.colorId || p.bitDepth !== a.bitDepth)
+        throw new Error(msg("joinMismatch", `${p.width} × ${p.height}`, `${a.width} × ${a.height}`));
+    let n = 0;
+    for (const p of parts) { this.starts.push(n); n += p.frameCount; }
+    this.frameCount = n;
+    this.kind = a.kind;
+    this.width = a.width;
+    this.height = a.height;
+    this.colorId = a.colorId;
+    this.bitDepth = a.bitDepth;
+    this.clock = a.clock;
+    this.linear = a.linear;
+    this.fps = a.fps;
+    this.meta = { ...a.meta };
+  }
+
+  /** Quelle und Bildnummer darin */
+  locate(i: number): [FrameSource, number] {
+    let k = this.starts.length - 1;
+    while (k > 0 && this.starts[k] > i) k--;
+    return [this.parts[k], i - this.starts[k]];
+  }
+
+  readFrame(i: number): Promise<Frame> {
+    const [p, j] = this.locate(i);
+    return p.readFrame(j);
+  }
+
+  frameName(i: number): string {
+    const [p, j] = this.locate(i);
+    return p.frameName(j);
+  }
+
+  exposure(i: number): number | undefined {
+    const [p, j] = this.locate(i);
+    return p.exposure?.(j);
+  }
+
+  async readTimestamps(): Promise<BigInt64Array | null> {
+    const all: BigInt64Array[] = [];
+    for (const p of this.parts) {
+      const t = await p.readTimestamps();
+      if (!t || t.length < p.frameCount) return null;
+      all.push(t.subarray(0, p.frameCount));
+    }
+    const out = new BigInt64Array(this.frameCount);
+    all.forEach((t, k) => out.set(t, this.starts[k]));
+    return out;
+  }
+
+  dispose() {
+    for (const p of this.parts) (p as { dispose?: () => void }).dispose?.();
+  }
+}

@@ -367,8 +367,15 @@
         </section>
 
         <section class="card run">
+          <div id="batchRow" class="batch" hidden>
+            <strong id="batchTitle"></strong>
+            <small id="batchHint" class="muted"></small>
+            <label><input type="checkbox" id="batchJoin" /> <span data-i18n="batch.join">Join into one series (one output, best frames chosen from all)</span></label>
+            <details><summary data-i18n="batch.files">Files</summary><ol id="batchList"></ol></details>
+          </div>
           <button id="run" class="btn primary big" disabled>Process</button>
           <button id="cancel" class="btn" hidden data-i18n="btn.cancel">Cancel</button>
+          <small id="batchLabel" class="muted" hidden></small>
           <div class="progress" hidden><div id="bar"></div><span id="progressLabel"></span></div>
           <div id="result" class="result" hidden></div>
           <p id="error" class="error" role="alert" hidden></p>

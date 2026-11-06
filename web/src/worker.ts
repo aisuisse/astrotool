@@ -3,7 +3,7 @@
 import { analyseFrame, colouriseOutput, outputColorId, outputSize, processSource, type FrameResult, type ProcessOptions } from "./engine/pipeline";
 import { transformedSize } from "./engine/transform";
 import { colorName, SerReader, SerWriter, type Frame } from "./engine/ser";
-import { FitsCubeSource, ImageSequenceSource, serSource, type FrameSource, type ImageDecoder } from "./engine/source";
+import { FitsCubeSource, ImageSequenceSource, JoinedSource, serSource, type FrameSource, type ImageDecoder } from "./engine/source";
 import { AviSource } from "./engine/avi";
 import { RAW_EXT, rawPreview } from "./engine/raw";
 import { decodeFits, FITS_EXT, fitsBaseName, isFits } from "./engine/fits";
@@ -39,7 +39,7 @@ async function encodeImage(f: Frame, format: OutputFormat, meta: ImageMeta): Pro
 }
 
 export type ToWorker =
-  | { type: "open"; files: File[]; bigEndian: boolean; rawMode?: "raw" | "preview" }
+  | { type: "open"; files: File[]; bigEndian: boolean; rawMode?: "raw" | "preview"; join?: boolean }
   | { type: "preview"; index: number; options: ProcessOptions }
   | { type: "process"; options: ProcessOptions; format: OutputFormat; folder?: FileSystemDirectoryHandle; target?: FileSystemFileHandle; timelapse: TimelapseOptions; montage?: MontageOptions; nativeHevc?: boolean }
   | { type: "native-reply"; id: number; ok: boolean; result?: unknown; error?: string }
@@ -171,20 +171,41 @@ function activeSource(): FrameSource {
   return calSource;
 }
 
-/** Dateien öffnen wie beim Laden der Aufnahme: eine SER/ein Video oder eine Bildserie */
-async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = false) {
+export const VIDEO_EXT = /\.(ser|avi|mp4|m4v|mov|mkv|webm)$/i;
+
+/** Eine SER-Datei oder ein Video öffnen */
+async function openVideo(f: File, bigEndian: boolean): Promise<{ src: FrameSource; name: string }> {
+  if (/\.ser$/i.test(f.name)) {
+    const name = f.name.replace(/\.ser$/i, "");
+    return { src: serSource(await SerReader.open(f, { bigEndian }), name), name };
+  }
+  const name = f.name.replace(/\.[^.]+$/, "");
+  return { src: /\.avi$/i.test(f.name) ? await AviSource.open(f, f.name, decodeImage) : await MediaVideoSource.open(f, f.name), name };
+}
+
+/**
+ * Dateien öffnen wie beim Laden der Aufnahme: eine SER/ein Video, eine Bildserie – oder (join) mehrere SER/Videos
+ * als eine Serie (PIPP -join).
+ */
+async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = false, join = false) {
   const dec = makeDecoder(rawMode);
+  if (join && files.length > 1 && files.every((f) => VIDEO_EXT.test(f.name))) {
+    const parts: { src: FrameSource; name: string }[] = [];
+    try {
+      for (const f of files) parts.push(await openVideo(f, bigEndian));
+      const src = new JoinedSource(parts.map((p) => p.src));
+      return { src, name: `${parts[0].name}-${parts[parts.length - 1].name}`, dec, partNames: files.map((f) => f.name) };
+    } catch (e) {
+      for (const p of parts) (p.src as { dispose?: () => void }).dispose?.();
+      throw e;
+    }
+  }
   const ser = files.length === 1 && /\.ser$/i.test(files[0].name);
   const video = files.length === 1 && /\.(avi|mp4|m4v|mov|mkv|webm)$/i.test(files[0].name);
   let src: FrameSource, name: string;
   let cube: FitsCubeSource | null = null;
-  if (video) {
-    const f = files[0];
-    name = f.name.replace(/\.[^.]+$/, "");
-    src = /\.avi$/i.test(f.name) ? await AviSource.open(f, f.name, decodeImage) : await MediaVideoSource.open(f, f.name);
-  } else if (ser) {
-    name = files[0].name.replace(/\.ser$/i, "");
-    src = serSource(await SerReader.open(files[0], { bigEndian }), name);
+  if (video || ser) {
+    ({ src, name } = await openVideo(files[0], bigEndian));
   } else if (files.length === 1 && FITS_EXT.test(files[0].name) && (cube = await FitsCubeSource.open(files[0], files[0].name))) {
     // FITS mit mehreren Bildern (Würfel, Erweiterungen): wie ein SER-Video
     src = cube;
@@ -196,7 +217,7 @@ async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = 
     src = await ImageSequenceSource.open(images.map((f) => ({ file: f, name: f.name, raw: RAW_EXT.test(f.name) })), dec.decode);
     name = `${src.frameName(0)}-${src.frameName(src.frameCount - 1)}`;
   }
-  return { src, name, dec };
+  return { src, name, dec, partNames: null as string[] | null };
 }
 
 /** Master aus höchstens 256 Bildern – oder ein gespeicherter Master (eine FITS-Datei) */
@@ -247,6 +268,21 @@ function computeFrameTimes(src: FrameSource, stamps: BigInt64Array | null, fileN
   if (start === null) return null;
   const out = new Float64Array(n);
   for (let i = 0; i < n; i++) out[i] = start + (fps && fps > 0 ? (i * 1000) / fps : 0);
+  return out;
+}
+
+/** Zusammengefügte Aufnahmen: Zeiten je Teil (jede Datei hat ihre eigene Startzeit), aneinandergehängt */
+async function joinedFrameTimes(src: FrameSource, names: string[] | null): Promise<Float64Array | null> {
+  if (!(src instanceof JoinedSource) || !names) return null;
+  const out = new Float64Array(src.frameCount);
+  let at = 0;
+  for (let k = 0; k < src.parts.length; k++) {
+    const p = src.parts[k];
+    const t = computeFrameTimes(p, await p.readTimestamps(), names[k], p.fps ?? null);
+    if (!t) return null;
+    out.set(t, at);
+    at += p.frameCount;
+  }
   return out;
 }
 
@@ -448,7 +484,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
     }
     if (m.type === "open") {
       const seq = ++openSeq;
-      const { src: next, name: nextName, dec } = await openFiles(m.files, m.rawMode ?? "raw", m.bigEndian);
+      const { src: next, name: nextName, dec, partNames } = await openFiles(m.files, m.rawMode ?? "raw", m.bigEndian, m.join);
       // inzwischen wurde etwas anderes geöffnet: dieses Ergebnis verwerfen
       if (seq !== openSeq) { (next as { dispose?: () => void }).dispose?.(); return; }
       (source as { dispose?: () => void } | null)?.dispose?.();
@@ -460,7 +496,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       if (source.kind === "ser" && ts && ts.length > 1 && ts[ts.length - 1] > ts[0]) {
         fps = ((ts.length - 1) * 1e7) / Number(ts[ts.length - 1] - ts[0]);
       }
-      frameTimes = computeFrameTimes(source, ts, m.files.length === 1 ? m.files[0].name : nextName, fps);
+      frameTimes = await joinedFrameTimes(source, partNames) ?? computeFrameTimes(source, ts, m.files.length === 1 ? m.files[0].name : nextName, fps);
       post({
         type: "opened",
         info: {

@@ -52,6 +52,8 @@ function setLang(l: Lang) {
   renderCal();
   syncAnchor();
   syncEdit();
+  renderBatch();
+  if (lastBatch && !busy) renderBatchResult();
 }
 $("lang").addEventListener("click", () => setLang(lang === "en" ? "de" : "en"));
 
@@ -277,11 +279,12 @@ let lastFiles: File[] = [];
 $<HTMLSelectElement>("rawMode").addEventListener("change", () => {
   if (lastFiles.length && info?.raw) openFiles(lastFiles);
 });
+const VIDEO_RE = /\.(ser|avi|mp4|m4v|mov|mkv|webm)$/i;
 function openFiles(list: FileList | File[] | null | undefined) {
   const files = Array.from(list ?? []);
   if (!files.length) return;
-  const sers = files.filter((f) => /\.(ser|avi|mp4|m4v|mov|mkv|webm)$/i.test(f.name));
-  if (sers.length > 1 || (sers.length && files.length > 1)) {
+  const sers = files.filter((f) => VIDEO_RE.test(f.name));
+  if (sers.length && sers.length < files.length) {
     showError(L("err.mixed"));
     return;
   }
@@ -289,7 +292,150 @@ function openFiles(list: FileList | File[] | null | undefined) {
   $("result").hidden = true;
   $("drop").querySelector("strong")!.textContent = L("drop.reading");
   lastFiles = files;
-  send({ type: "open", files, bigEndian: false, rawMode: $<HTMLSelectElement>("rawMode").value as "raw" | "preview" });
+  // Mehrere SER/Videos: Stapel (jede einzeln) oder zusammengefügt
+  if (sers.length > 1) {
+    batch = { files: [...sers].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })), join: $<HTMLInputElement>("batchJoin").checked };
+    sendOpen(batch.join ? batch.files : [batch.files[0]], batch.join);
+  } else {
+    batch = null;
+    sendOpen(files);
+  }
+  renderBatch();
+}
+function sendOpen(files: File[], join = false) {
+  send({ type: "open", files, bigEndian: false, rawMode: $<HTMLSelectElement>("rawMode").value as "raw" | "preview", join });
+}
+
+// ---------- Stapel: mehrere Aufnahmen (wie PIPP) ----------
+/** Mehrere SER/Videos geöffnet; join = als eine Serie */
+let batch: { files: File[]; join: boolean } | null = null;
+/** läuft gerade ein Stapel? Dann gehen Meldungen des Workers an diesen Empfänger */
+let batchWait: ((m: FromWorker) => void) | null = null;
+let batchCancel = false;
+let batchCurrent = 0;
+let lastBatch: { rows: BatchRow[]; total: number; seconds: number; cancelled: boolean; folder: boolean } | null = null;
+interface BatchRow { name: string; written?: number; rejected?: number; saved: string[]; error?: string; links: { name: string; url: string }[] }
+
+function renderBatch() {
+  const row = $("batchRow");
+  row.hidden = !batch;
+  if (!batch) { updateRunLabel(); return; }
+  $<HTMLInputElement>("batchJoin").checked = batch.join;
+  $("batchTitle").textContent = L("batch.title", batch.files.length);
+  $("batchHint").textContent = batch.join ? L("batch.hintJoin", info?.frameCount ?? "…") : L("batch.hint", batch.files[batchCurrent]?.name ?? "");
+  $("batchList").replaceChildren(...batch.files.map((f, i) => Object.assign(document.createElement("li"), { textContent: f.name, className: !batch!.join && i === batchCurrent ? "cur" : "" })));
+  updateRunLabel();
+}
+$<HTMLInputElement>("batchJoin").addEventListener("change", (e) => {
+  if (!batch || busy) return;
+  batch.join = (e.target as HTMLInputElement).checked;
+  batchCurrent = 0;
+  sendOpen(batch.join ? batch.files : [batch.files[0]], batch.join);
+  renderBatch();
+});
+const isBatch = () => !!batch && !batch.join;
+
+/** Nächste Meldung des Workers abwarten, die `want` erfüllt */
+function nextMessage(want: (m: FromWorker) => boolean): Promise<FromWorker> {
+  return new Promise((res) => {
+    batchWait = (m) => {
+      if (!want(m)) return;
+      batchWait = null;
+      res(m);
+    };
+  });
+}
+
+async function writeBlob(dir: FileSystemDirectoryHandle, name: string, blob: Blob) {
+  const fh = await dir.getFileHandle(name, { create: true });
+  const w = await fh.createWritable();
+  await w.write(blob);
+  await w.close();
+}
+
+async function runBatch(format: OutputFormat) {
+  const files = batch!.files;
+  const t0 = performance.now();
+  let folder: FileSystemDirectoryHandle | undefined;
+  if ("showDirectoryPicker" in window) {
+    try {
+      folder = await (window as unknown as { showDirectoryPicker(o: object): Promise<FileSystemDirectoryHandle> }).showDirectoryPicker({ mode: "readwrite" });
+    } catch {
+      finish();
+      return;
+    }
+  }
+  batchCancel = false;
+  const rows: BatchRow[] = [];
+  for (let i = 0; i < files.length && !batchCancel; i++) {
+    const f = files[i], row: BatchRow = { name: f.name, saved: [], links: [] };
+    rows.push(row);
+    batchCurrent = i;
+    renderBatch();
+    $("batchLabel").textContent = L("batch.progress", i + 1, files.length, f.name);
+    const wait = nextMessage((m) => m.type === "opened" || m.type === "error");
+    sendOpen([f]);
+    const op = await wait;
+    if (op.type === "error") { row.error = M(op.message); continue; }
+    if (batchCancel) break;
+    try {
+      // Ziel im Ordner: SER als Datei, Einzelbilder in einen Unterordner je Aufnahme
+      let target: FileSystemFileHandle | undefined, sub: FileSystemDirectoryHandle | undefined;
+      const wj = options.winjupos ? winjuposExample(format === "ser" ? "ser" : "zip") : null;
+      if (folder && format === "ser") {
+        const name = wj ?? `${info!.name}_astro.ser`;
+        target = await folder.getFileHandle(name, { create: true });
+        row.saved.push(name);
+      } else if (folder && isImageFormat(format)) {
+        const name = wj ? wj.replace(/\.zip$/, "") : `${info!.name}_astro`;
+        sub = await folder.getDirectoryHandle(name, { create: true });
+        row.saved.push(`${name}/`);
+      }
+      const done = nextMessage((m) => m.type === "done" || m.type === "error");
+      send({ type: "process", options, format, folder: sub, target, timelapse, montage, nativeHevc: isDesktopApp() });
+      const d = await done;
+      if (d.type === "error") {
+        row.error = d.message === "@cancelled" ? L("err.cancelled") : M(d.message);
+        if (d.message === "@cancelled") batchCancel = true;
+        continue;
+      }
+      if (d.type !== "done") continue;
+      row.written = d.written;
+      row.rejected = d.rejected.length;
+      // Ergebnisse, die als Datei im Speicher zurückkommen (ohne Ordner, Zeitraffer, Montage)
+      const blobs: { name: string; blob: Blob }[] = [];
+      if (d.blob) blobs.push({ name: d.fileName, blob: d.blob });
+      if (d.timelapse) blobs.push({ name: d.timelapse.fileName, blob: d.timelapse.blob });
+      if (d.montage) blobs.push({ name: d.montage.fileName, blob: d.montage.blob });
+      for (const b of blobs) {
+        if (folder) {
+          await writeBlob(folder, b.name, b.blob);
+          row.saved.push(b.name);
+        } else row.links.push({ name: b.name, url: URL.createObjectURL(b.blob) });
+      }
+    } catch (e) {
+      row.error = e instanceof Error ? e.message : String(e);
+    }
+  }
+  const cancelled = batchCancel;
+  batchWait = null;
+  lastBatch = { rows, total: files.length, seconds: (performance.now() - t0) / 1000, cancelled, folder: !!folder };
+  finish();
+  renderBatchResult();
+}
+
+function renderBatchResult() {
+  const b = lastBatch;
+  if (!b) return;
+  const el = $("result");
+  el.hidden = false;
+  const ok = b.rows.filter((r) => !r.error).length;
+  const head = b.cancelled ? L("batch.cancelled", b.rows.length, b.total) : L("batch.summary", ok, b.total, b.seconds.toFixed(1));
+  const rows = b.rows.map((r) => `<tr><td>${escapeHtml(r.name)}</td>${r.error
+    ? `<td class="bad" colspan="2">${escapeHtml(r.error)}</td>`
+    : `<td>${escapeHtml(L("batch.frames", r.written ?? 0, r.rejected ?? 0))}</td><td>${[...r.saved.map(escapeHtml), ...r.links.map((l) => `<a href="${l.url}" download="${escapeHtml(l.name)}">${escapeHtml(l.name)}</a>`)].join("<br>")}</td>`}</tr>`).join("");
+  el.innerHTML = `<strong>${escapeHtml(head)}</strong>${b.folder ? `<small>${escapeHtml(L("batch.folder"))}</small>` : ""}
+    <table class="batchTable"><thead><tr><th>${escapeHtml(L("batch.colFile"))}</th><th>${escapeHtml(L("batch.colResult"))}</th><th>${escapeHtml(L("batch.colSaved"))}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ---------- Zuletzt geöffnet (Datei-Handles, nur wo showOpenFilePicker existiert) ----------
@@ -589,6 +735,13 @@ $("run").addEventListener("click", async () => {
   $("cancel").hidden = false;
   ($("bar").parentElement as HTMLElement).hidden = false;
   const format = formatSel.value as OutputFormat;
+  if (isBatch()) {
+    lastDone = null;
+    lastBatch = null;
+    $("batchLabel").hidden = false;
+    await runBatch(format);
+    return;
+  }
   // Direkt auf die Platte: Einzelbilder in einen Ordner, SER in eine Datei – geschrieben während der Verarbeitung,
   // ohne Grössengrenze durch den Arbeitsspeicher
   let folder: FileSystemDirectoryHandle | undefined;
@@ -612,10 +765,14 @@ $("run").addEventListener("click", async () => {
   }
   send({ type: "process", options, format, folder, target, timelapse, montage, nativeHevc: isDesktopApp() });
 });
-$("cancel").addEventListener("click", () => send({ type: "cancel" }));
+$("cancel").addEventListener("click", () => {
+  if (batchWait) batchCancel = true;
+  send({ type: "cancel" });
+});
 
 function finish() {
   busy = false;
+  $("batchLabel").hidden = true;
   $<HTMLButtonElement>("run").disabled = !info;
   $("cancel").hidden = true;
   ($("bar").parentElement as HTMLElement).hidden = true;
@@ -662,7 +819,7 @@ const toFolder = $<HTMLInputElement>("toFolder");
 if (!("showDirectoryPicker" in window && "showSaveFilePicker" in window)) $("folderRow").hidden = true;
 function updateRunLabel() {
   const f = formatSel.value as OutputFormat;
-  $("run").textContent = f === "ser" || f === "none" ? L(f === "ser" ? "run.ser" : "run.none") : L("run.image", L(`fmt.${f}`));
+  $("run").textContent = isBatch() ? L("batch.run", batch!.files.length) : f === "ser" || f === "none" ? L(f === "ser" ? "run.ser" : "run.none") : L("run.image", L(`fmt.${f}`));
   toFolder.disabled = f === "none";
   const lbl = $("toFolderLabel"), key = f === "ser" ? "opt.toFile" : "opt.toFolder";
   lbl.dataset.i18n = key; // bleibt beim Sprachwechsel richtig
@@ -780,6 +937,12 @@ async function relayNative(m: Extract<FromWorker, { type: "native" }>) {
 
 worker.onmessage = (ev: MessageEvent<FromWorker>) => {
   const m = ev.data;
+  // Stapel: Ergebnis und Fehler einer Aufnahme gehen an den Ablauf, nicht in die normale Anzeige
+  if (batchWait && (m.type === "done" || m.type === "error")) {
+    batchWait(m);
+    return;
+  }
+  if (batchWait && m.type === "opened") queueMicrotask(() => batchWait?.(m));
   switch (m.type) {
     case "native":
       void relayNative(m);
@@ -795,17 +958,19 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
         pendingHandles = null;
         void p.then((h) => (h ? rememberRecent(h) : undefined)).then(renderRecent);
       }
-      // Ankerbox gehört zur vorigen Aufnahme
-      options.surfaceAnchor = null;
+      // Ankerbox gehört zur vorigen Aufnahme (im Stapel bleibt sie: gleiche Aufnahmeart)
+      if (!batchWait) options.surfaceAnchor = null;
       syncAnchor();
       // geladene Master an die neue Aufnahme anpassen (passt die Grösse nicht: nicht anwenden)
       renderCal();
       sendCalUse();
       lastPreview = null;
       lastDone = null;
-      formatSel.value = info.kind === "images" ? "png" : "ser";
+      // im Stapel bleibt das gewählte Format
+      if (!batch) formatSel.value = info.kind === "images" ? "png" : "ser";
       updateRunLabel();
       syncEdit();
+      if (batch) renderBatch();
       // Debayer-Optionen nur bei Rohdaten (Mono/Bayer) – JPG/PNG sind schon farbig
       document.querySelectorAll<HTMLElement>(".colourRow").forEach((el) => (el.hidden = info!.colorId >= 100));
       document.querySelectorAll<HTMLElement>(".rawRow").forEach((el) => (el.hidden = !info!.raw));
@@ -816,7 +981,7 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       renderInfo(info);
       document.title = `${info.name} – Astrotool`;
       setFrame(0);
-      player.opened(info);
+      player.opened(info, !!batchWait);
       break;
     }
     case "preview": {

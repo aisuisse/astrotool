@@ -304,8 +304,8 @@ export function initPlayer(ctx: PlayerContext) {
   return {
     isViewing: () => mode === "view",
     isExporting: () => exporting,
-    /** Neue Datei geöffnet */
-    opened(info: FileInfo) {
+    /** Neue Datei geöffnet; keepMode: Ansicht nicht wechseln (Stapel läuft) */
+    opened(info: FileInfo, keepMode = false) {
       setPlaying(false);
       markA = markB = null;
       current = 0;
@@ -314,7 +314,7 @@ export function initPlayer(ctx: PlayerContext) {
       $("modeTabs").hidden = false;
       updateMarkers();
       // SER-Videos direkt im Betrachter öffnen (wie SER Player), Bildserien in der Verarbeitung
-      setMode(info.kind === "images" ? "process" : "view");
+      if (!keepMode) setMode(info.kind === "images" ? "process" : "view");
     },
     handle(m: FromWorker) {
       if (m.type === "rendered") {

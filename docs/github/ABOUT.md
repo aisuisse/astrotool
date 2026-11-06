@@ -23,7 +23,7 @@ ser, pipp, autostakkert, hdr, timelapse, raw-image, debayer, tauri, typescript, 
 
 ## Social preview image
 
-1280 × 640 px, e.g. a crop of `docs/images/accuracy-pipp-vs-astrotool.jpg` or an HDR image of the corona (only own photos, or photos with permission).
+`docs/github/social-preview.png` (1280 × 640 px, 6 Nov 2026): app name, tagline and drawn graphics only – the ringed planet of the app icon and the phases of an eclipse, no photos. Source: `social-preview.html` in the same folder (render with a headless Chromium browser at 1280 × 640). Upload by hand: GitHub → repository Settings → General → Social preview → Edit → Upload an image.
 
 ## Release notes – first public release
 

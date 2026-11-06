@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Astrotool social preview</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #0d1117; }
+  body { width: 1280px; height: 640px; overflow: hidden; font-family: "Segoe UI", "Inter", system-ui, sans-serif; }
+  .card { position: relative; width: 1280px; height: 640px; overflow: hidden;
+    background: radial-gradient(ellipse 900px 600px at 78% 40%, #1b2433 0%, #0d1117 70%); }
+  svg.sky { position: absolute; inset: 0; }
+  .text { position: absolute; left: 88px; top: 150px; width: 640px; color: #e6edf3; }
+  .brand { display: flex; align-items: center; gap: 22px; }
+  .brand svg { width: 92px; height: 92px; }
+  h1 { margin: 0; font-size: 104px; font-weight: 700; letter-spacing: -2px; line-height: 1; }
+  .tag { margin: 30px 0 0; font-size: 34px; line-height: 1.3; color: #c9d3dd; }
+  .tag b { color: #f0a640; font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 40px; }
+  .chip { font-size: 21px; padding: 8px 16px; border-radius: 999px; border: 1.5px solid #2d3540; color: #a9b4bf; background: #121821; }
+  .chip.acc { border-color: #f0a64088; color: #f0c27a; }
+</style>
+</head>
+<body>
+<div class="card">
+  <svg class="sky" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="sun" cx="40%" cy="38%" r="70%">
+        <stop offset="0" stop-color="#ffd58a" />
+        <stop offset="0.6" stop-color="#f0a640" />
+        <stop offset="1" stop-color="#c9741c" />
+      </radialGradient>
+      <radialGradient id="corona" cx="50%" cy="50%" r="50%">
+        <stop offset="0.55" stop-color="#f6e7c8" stop-opacity="0.55" />
+        <stop offset="0.75" stop-color="#f0c27a" stop-opacity="0.18" />
+        <stop offset="1" stop-color="#f0a640" stop-opacity="0" />
+      </radialGradient>
+      <radialGradient id="planet" cx="38%" cy="32%" r="75%">
+        <stop offset="0" stop-color="#ffd9a0" />
+        <stop offset="0.55" stop-color="#e79a3c" />
+        <stop offset="1" stop-color="#a4581a" />
+      </radialGradient>
+      <clipPath id="ringfront" clipPathUnits="userSpaceOnUse"><rect x="-230" y="0" width="460" height="90" /></clipPath>
+    </defs>
+    <!-- Sterne (fest verteilt) -->
+    <g fill="#e6edf3">
+      <circle cx="760" cy="70" r="1.6" opacity=".7" /><circle cx="842" cy="132" r="1.1" opacity=".5" /><circle cx="1180" cy="58" r="1.8" opacity=".8" />
+      <circle cx="1235" cy="190" r="1.2" opacity=".5" /><circle cx="1010" cy="40" r="1.3" opacity=".6" /><circle cx="705" cy="560" r="1.4" opacity=".5" />
+      <circle cx="1240" cy="600" r="1.5" opacity=".6" /><circle cx="955" cy="610" r="1.1" opacity=".5" /><circle cx="640" cy="40" r="1.2" opacity=".4" />
+      <circle cx="40" cy="60" r="1.3" opacity=".4" /><circle cx="300" cy="590" r="1.2" opacity=".35" /><circle cx="560" cy="610" r="1.6" opacity=".5" />
+      <circle cx="1120" cy="300" r="1.1" opacity=".5" /><circle cx="1255" cy="410" r="1.4" opacity=".6" /><circle cx="780" cy="330" r="1" opacity=".4" />
+    </g>
+    <!-- Finsternis-Phasen auf einem Bogen: Mond (dunkel) wandert vor der Sonne vorbei, Totalität in der Mitte -->
+    <g>
+      <path d="M 760 520 Q 1010 300 1250 520" fill="none" stroke="#2d3540" stroke-width="2" stroke-dasharray="4 8" />
+      <g transform="translate(790 488)"><circle r="26" fill="url(#sun)" /><circle cx="34" cy="-6" r="27" fill="#0f1520" /></g>
+      <g transform="translate(870 432)"><circle r="26" fill="url(#sun)" /><circle cx="18" cy="-4" r="27" fill="#111824" /></g>
+      <g transform="translate(1010 400)"><circle r="62" fill="url(#corona)" /><circle r="27" fill="#0b0f16" stroke="#fbe9c9" stroke-width="1.6" /></g>
+      <g transform="translate(1150 432)"><circle r="26" fill="url(#sun)" /><circle cx="-18" cy="4" r="27" fill="#111824" /></g>
+      <g transform="translate(1230 488)"><circle r="26" fill="url(#sun)" /><circle cx="-34" cy="6" r="27" fill="#0f1520" /></g>
+    </g>
+    <!-- Ringplanet wie im App-Symbol -->
+    <g transform="translate(1010 205) rotate(-20)">
+      <ellipse rx="190" ry="44" fill="none" stroke="#f0a640" stroke-width="16" opacity=".95" />
+      <circle r="102" fill="url(#planet)" />
+      <g clip-path="url(#ringfront)"><ellipse rx="190" ry="44" fill="none" stroke="#f5b154" stroke-width="16" /></g>
+    </g>
+  </svg>
+  <div class="text">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="9" fill="#f0a640" /><ellipse cx="16" cy="16" rx="15" ry="4.5" transform="rotate(-20 16 16)" fill="none" stroke="#f0a640" stroke-width="2" /></svg>
+      <h1>Astrotool</h1>
+    </div>
+    <p class="tag">Pre-processing for <b>planets</b>, <b>Moon</b>, <b>Sun</b> &amp; <b>eclipses</b> – the open successor to PIPP</p>
+    <div class="chips">
+      <span class="chip acc">SER · AVI · FITS · RAW</span>
+      <span class="chip">WinJUPOS</span>
+      <span class="chip">Batch</span>
+      <span class="chip">Windows app · GPL-3.0</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 const args = process.argv.slice(2);
 const exe = args[0], outDir = args[1] && resolve(args[1]);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
-const smallSer = opt("--ser"), imageDir = opt("--images"), bigSer = opt("--big"), totalityDir = opt("--totality"), aviDir = opt("--avi"), rawDir = opt("--raw"), calDir = opt("--cal"), fitsDir = opt("--fits"), fitsCube = opt("--fitscube"), surfaceSer = opt("--surface"), fzDir = opt("--fz");
+const smallSer = opt("--ser"), imageDir = opt("--images"), bigSer = opt("--big"), totalityDir = opt("--totality"), aviDir = opt("--avi"), rawDir = opt("--raw"), calDir = opt("--cal"), fitsDir = opt("--fits"), fitsCube = opt("--fitscube"), surfaceSer = opt("--surface"), fzDir = opt("--fz"), batchDir = opt("--batch");
 if (!exe || !outDir || !smallSer || !imageDir) {
   console.error("Aufruf: node scripts/app-fulltest.mjs <astrotool.exe> <ausgabeordner> --ser <klein.ser> --images <bilderordner> [--big <gross.ser>]");
   process.exit(2);
@@ -692,6 +692,47 @@ try {
   });
 
   // ---------- Komprimiertes FITS (.fits.fz, Rice): GONG Hα Teneriffa 12.08.2026, partielle Finsternis ----------
+  // ---------- Stapel: mehrere SER (scripts: Teile von saturn600.ser) ----------
+  if (batchDir) await test("Stapel: 3 SER einzeln → Ordner mit WinJUPOS-Namen, dann zusammengefügt → beste 50 %", async () => {
+    const files = readdirSync(batchDir).filter((f) => /\.ser$/i.test(f)).sort().map((f) => resolve(join(batchDir, f)));
+    await openFiles(files, "saturn_teil1");
+    const row = await ev(`({ shown: !document.getElementById('batchRow').hidden, title: document.getElementById('batchTitle').innerText, run: document.getElementById('run').innerText })`);
+    check(row.shown && /3/.test(row.title) && /3/.test(row.run), `Stapel-Anzeige: ${JSON.stringify(row)}`);
+    await processMode();
+    await ev(`document.querySelector('[data-preset="planet"]').click(); true`);
+    await sleep(800);
+    // Ordner-Dialog durch einen Ordner im privaten Speicher der Seite (OPFS) ersetzen
+    await ev(`(async () => {
+      const root = await navigator.storage.getDirectory();
+      try { await root.removeEntry('stapel-test', { recursive: true }); } catch {}
+      window.__stapel = await root.getDirectoryHandle('stapel-test', { create: true });
+      window.__origDir = window.showDirectoryPicker;
+      window.showDirectoryPicker = async () => window.__stapel;
+      __t.set('#format', 'ser'); __t.set('[data-tl="enabled"]', false);
+      __t.set('[data-opt="winjupos"]', true); __t.set('[data-opt="wjObserver"]', 'JS');
+      __t.set('[data-opt="keepMode"]', 'percent'); __t.set('[data-opt="keepValue"]', 50);
+      return true; })()`);
+    const r = await runAndWait(600_000);
+    const saved = await ev(`(async () => { const out = []; for await (const [n, h] of window.__stapel.entries()) { const f = await h.getFile(); const v = new DataView(await f.slice(0, 178).arrayBuffer()); out.push({ n, frames: v.getInt32(38, true), w: v.getInt32(26, true) }); } return out.sort((a, b) => a.n.localeCompare(b.n)); })()`);
+    check(saved.length === 3 && saved.every((s) => /^2022-10-25-0055_\d-JS\.ser$/.test(s.n) && s.frames === 30 && s.w === 448) && new Set(saved.map((s) => s.n)).size === 3, `Ordner: ${JSON.stringify(saved)}`);
+    check(/3 (of|von) 3/.test(r.text), `Ergebnis: ${r.text.slice(0, 200)}`);
+    // zusammenfügen: eine Serie mit 180 Bildern, beste 50 % → eine SER mit 90 Bildern
+    await ev(`__t.set('#batchJoin', true); true`);
+    await waitFor(`document.title.startsWith('saturn_teil1-saturn_teil3')`, 60_000, "zusammengefügt geöffnet");
+    await sleep(1500);
+    const info = await ev(`document.getElementById('info').innerText.replace(/\\n/g, ' | ')`);
+    check(/180/.test(info), `Info: ${info}`);
+    const r2 = await runAndWait(600_000);
+    const ser = r2.files.find((f) => /\.ser$/.test(f.name));
+    check(ser && ser.frames === 90 && /^2022-10-25-0055_\d-JS\.ser$/.test(ser.name), `SER: ${JSON.stringify(ser)}`);
+    await ev(`(async () => {
+      __t.set('#batchJoin', false); __t.set('[data-opt="winjupos"]', false); __t.set('[data-opt="wjObserver"]', '');
+      window.showDirectoryPicker = window.__origDir;
+      try { await (await navigator.storage.getDirectory()).removeEntry('stapel-test', { recursive: true }); } catch {}
+      return true; })()`);
+    return { saved, text: r.text.slice(0, 300), joined: ser };
+  });
+
   if (fzDir) await test("FITS komprimiert (.fits.fz): GONG-Finsternis, Sonnenrand → PNG", async () => {
     const all = readdirSync(fzDir).filter((f) => /\.fits\.fz$/i.test(f)).sort();
     const files = all.filter((_, i) => i % 6 === 0).map((f) => resolve(join(fzDir, f))); // Vollscheibe bis tiefe Phase

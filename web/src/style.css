@@ -192,6 +192,10 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-siz
 .tablewrap { overflow-x: auto; }
 table.tools { width: 100%; border-collapse: collapse; }
 table.tools td { border-top: 1px solid var(--line); padding: 8px 6px; vertical-align: top; }
+/* lange Programmpfade umbrechen, sonst wird die Beschreibung zur schmalen Spalte */
+table.tools td:nth-child(1) { width: 22%; }
+table.tools td:nth-child(2) { width: 38%; }
+table.tools td:nth-child(3) small.tag { overflow-wrap: anywhere; word-break: break-all; }
 table.tools a { color: var(--accent); }
 .tag { color: var(--muted); }
 .okText { color: var(--ok); font-weight: 600; }
@@ -200,3 +204,11 @@ table.tools a { color: var(--accent); }
 .dialogBody { padding: 4px 16px 16px; }
 .dialogBody a { color: var(--accent); }
 #result img.montage { width: 100%; height: auto; border-radius: 8px; background: #000; }
+
+/* Stapel: mehrere Aufnahmen */
+.batch { display: grid; gap: 6px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line, #3334); border-radius: 8px; }
+.batch ol { margin: 6px 0 0; padding-left: 22px; max-height: 160px; overflow: auto; font-size: 0.85em; }
+.batch li.cur { font-weight: 600; }
+.batchTable { width: 100%; border-collapse: collapse; font-size: 0.85em; margin: 6px 0; }
+.batchTable td, .batchTable th { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line, #3333); vertical-align: top; }
+.batchTable td.bad { color: var(--bad, #d55); }
