@@ -274,6 +274,8 @@ export interface HdrOptions {
    * gleichermassen; die Helligkeit im Mondinneren ist also genau dieser Schleier und wird je Farbe abgezogen.
    */
   moon?: { cx: number; cy: number; r: number };
+  /** Kennlinie der Kamera aus der Reihe bestimmen (Vorgabe: ja, nur bei sRGB-kodierten Bildern) */
+  calibrate?: boolean;
 }
 
 const SAT = 0.97;
@@ -298,6 +300,140 @@ function sampleClamped(d: ArrayLike<number>, w: number, h: number, p: number, c:
   return (d[i] * (1 - fx) + d[i + p] * fx) * (1 - fy) + (d[i + row] * (1 - fx) + d[i + row + p] * fx) * fy;
 }
 
+/** Messpaar für die Kennlinie: dieselbe Stelle im kürzer (a) und länger (b) belichteten Bild, kodiert 0..1 */
+interface ResponseSample {
+  a: number;
+  b: number;
+  /** Belichtungsverhältnis lang : kurz */
+  ratio: number;
+}
+
+/** Messpaare aus allen Bildpaaren der Reihe: nur ruhige Stellen (kein Rand), beide Werte weder verrauscht noch gesättigt. */
+function responseSamples(items: BracketFrame[], maxV: number): ResponseSample[] {
+  const { width: w, height: h, planes: p } = items[0].frame;
+  const order = items.map((_, i) => i).sort((x, y) => items[x].exposure - items[y].exposure);
+  const out: ResponseSample[] = [];
+  const step = Math.max(2, Math.floor(Math.sqrt((w * h) / 3000)));
+  const at = (it: BracketFrame, c: number, x: number, y: number) => sampleClamped(it.frame.data, w, h, p, c, x + it.dx, y + it.dy) / maxV;
+  for (let i = 0; i < order.length; i++)
+    for (let j = i + 1; j < order.length; j++) {
+      const A = items[order[i]], B = items[order[j]];
+      const ratio = B.exposure / A.exposure;
+      if (!(ratio >= 1.15 && ratio <= 64)) continue;
+      for (let y = 3; y < h - 3; y += step)
+        for (let x = 3; x < w - 3; x += step)
+          for (let c = 0; c < p; c++) {
+            const a = at(A, c, x, y), b = at(B, c, x, y);
+            if (a < 0.03 || b < 0.03 || a > 0.94 || b > 0.94) continue;
+            // ruhige Stelle: kleine Unterschiede zu den Nachbarn (sonst stören Kanten und kleine Versätze)
+            if (Math.max(Math.abs(at(A, c, x + 2, y) - a), Math.abs(at(A, c, x - 2, y) - a), Math.abs(at(A, c, x, y + 2) - a), Math.abs(at(A, c, x, y - 2) - a)) > 0.03) continue;
+            out.push({ a, b, ratio });
+          }
+    }
+  return out;
+}
+
+/** Typische Abweichung vom Belichtungsverhältnis (Median von |ln g(b) − ln(R·g(a))|) */
+function responseError(g: (v: number) => number, s: ResponseSample[]): number {
+  const d: number[] = [];
+  for (const q of s) {
+    const ga = g(q.a), gb = g(q.b);
+    if (ga > 0 && gb > 0) d.push(Math.abs(Math.log(gb / (q.ratio * ga))));
+  }
+  if (d.length < s.length / 2) return Infinity;
+  d.sort((x, y) => x - y);
+  return d[d.length >> 1];
+}
+
+/**
+ * Kennlinie der Kamera aus der Belichtungsreihe selbst bestimmen (Radiometric Self-Calibration; Ansatz mit
+ * geglätteter Kennlinie im Logarithmus nach Debevec & Malik 1997, hier mit Messpaaren statt unbekannter
+ * Leuchtdichte je Pixel – eigene Umsetzung). Kamera-JPEGs sind nicht nach sRGB kodiert, sondern mit der Tonkurve
+ * des Bildstils: in einer echten Reihe (Canon R7) war das gemessene Helligkeitsverhältnis zweier Bilder je nach
+ * Helligkeit das 0.7- bis 2.2-Fache des Verhältnisses laut EXIF – mit sRGB passen die Bilder nicht aneinander, an
+ * jedem Übergang entsteht ein Ring.
+ *
+ * G(v) = ln g(v) an 32 Stützstellen von v = 0.03 bis 1 (dazwischen linear), G(1) = 0. Für dieselbe Stelle in zwei
+ * Bildern mit Verhältnis R gilt G(v_lang) − G(v_kurz) = ln R – linear in den Stützwerten. Dazu eine Strafe für die
+ * Krümmung (glatte Kurve, auch über Bereiche ohne Messung); robust gewichtet. Steigt die Kurve nicht überall, wird
+ * stärker geglättet. Unter v = 0.03 wie sRGB fortgesetzt. Verwendet nur, wenn die Bilder damit deutlich besser
+ * zusammenpassen als mit sRGB. Ergebnis: Tabelle kodiert → linear, oder null.
+ */
+export function fitResponse(items: BracketFrame[], maxV: number): { lut: Float32Array; error: number; srgbError: number } | null {
+  if (items.length < 2) return null;
+  const s = responseSamples(items, maxV);
+  if (s.length < 400) return null;
+  // Bereich abgedeckt? (sonst wird die Kurve über weite Strecken geraten)
+  let lo = 1, hi = 0;
+  for (const q of s) { lo = Math.min(lo, q.a); hi = Math.max(hi, q.b); }
+  if (hi - lo < 0.5) return null;
+  const srgbError = responseError(srgbToLinear, s);
+  const K = 32, V0 = 0.03, span = 1 - V0, m = K - 1; // Unbekannte G_0 … G_{K-2}, G_{K-1} = 0
+  const knot = (v: number): [number, number] => {
+    const u = Math.min(K - 1 - 1e-9, Math.max(0, ((v - V0) / span) * (K - 1)));
+    const i = Math.floor(u);
+    return [i, u - i];
+  };
+  const hat = (v: number) => Math.min(1, 4 * Math.min(v, 1 - v));
+  let G: Float64Array | null = null;
+  for (let lam0 = 0.02; lam0 <= 50 && !G; lam0 *= 5) {
+    let sol: Float64Array | null = null;
+    let sigma = Infinity;
+    for (let it = 0; it < 6; it++) {
+      const A = new Float64Array(m * m), b = new Float64Array(m);
+      const add = (idx: number[], coef: number[], rhs: number, wt: number) => {
+        // Zeile Σ coef·G[idx] = rhs (G_{K-1} = 0 fällt weg)
+        for (let p = 0; p < idx.length; p++) {
+          if (idx[p] >= m) continue;
+          b[idx[p]] += wt * coef[p] * rhs;
+          for (let q = 0; q < idx.length; q++) if (idx[q] < m) A[idx[p] * m + idx[q]] += wt * coef[p] * coef[q];
+        }
+      };
+      const res: number[] = [];
+      let sumW = 0;
+      for (const q of s) {
+        const [ia, ta] = knot(q.a), [ib, tb] = knot(q.b);
+        const rhs = Math.log(q.ratio);
+        let r = 0;
+        if (sol) {
+          const gv = (i: number) => (i >= m ? 0 : sol![i]);
+          r = gv(ib) * (1 - tb) + gv(ib + 1) * tb - gv(ia) * (1 - ta) - gv(ia + 1) * ta - rhs;
+        }
+        res.push(r);
+        const wt = hat(q.a) * hat(q.b) * (Number.isFinite(sigma) ? 1 / (1 + (r / (3 * sigma)) ** 2) : 1);
+        sumW += wt;
+        add([ib, ib + 1, ia, ia + 1], [1 - tb, tb, -(1 - ta), -ta], rhs, wt);
+      }
+      // Glättung: zweite Differenz, gewichtet relativ zur Datenmenge
+      const lam = (lam0 * sumW) / K;
+      for (let k = 1; k < K - 1; k++) add([k - 1, k, k + 1], [1, -2, 1], 0, lam);
+      sol = solve(A, b, m);
+      if (!sol) break;
+      const abs = res.map(Math.abs).sort((x, y) => x - y);
+      if (it > 0) sigma = Math.max(1e-4, 1.4826 * abs[abs.length >> 1]);
+    }
+    if (!sol) continue;
+    // steigt die Kurve im ganzen Bereich?
+    let mono = true;
+    for (let k = 1; k < K; k++) if ((k >= m ? 0 : sol[k]) <= sol[k - 1]) mono = false;
+    if (mono) G = sol;
+  }
+  if (!G) return null;
+  const Gf = G;
+  const g = (v: number) => {
+    if (v <= 0) return 0;
+    if (v < V0) return Math.exp(Gf[0]) * (srgbToLinear(v) / srgbToLinear(V0));
+    const [i, t] = knot(v);
+    const a = i >= m ? 0 : Gf[i], b = i + 1 >= m ? 0 : Gf[i + 1];
+    return Math.exp(a * (1 - t) + b * t);
+  };
+  const error = responseError(g, s);
+  if (!(error < 0.7 * srgbError)) return null;
+  const lut = new Float32Array(maxV + 1);
+  for (let v = 0; v <= maxV; v++) lut[v] = g(v / maxV);
+  return { lut, error, srgbError };
+}
+
 /** Führt eine Belichtungsreihe zu einem Bild zusammen (gleiche Grösse, Farbe und Bittiefe wie die Eingabe). */
 export function mergeHdr(items: BracketFrame[], o: HdrOptions): Frame {
   if (!items.length) throw new Error("empty bracket");
@@ -305,8 +441,10 @@ export function mergeHdr(items: BracketFrame[], o: HdrOptions): Frame {
   const { width: w, height: h, planes: p, bitDepth } = ref;
   const maxV = (1 << bitDepth) - 1;
   const n = w * h;
-  const lut = new Float32Array(maxV + 1);
-  for (let v = 0; v <= maxV; v++) lut[v] = o.srgb ? srgbToLinear(v / maxV) : v / maxV;
+  // Kamera-JPEG: Kennlinie aus der Reihe, wenn sie die Bilder besser zusammenbringt als sRGB
+  const fitted = o.srgb && o.calibrate !== false ? fitResponse(items, maxV) : null;
+  const lut = fitted?.lut ?? new Float32Array(maxV + 1);
+  if (!fitted) for (let v = 0; v <= maxV; v++) lut[v] = o.srgb ? srgbToLinear(v / maxV) : v / maxV;
   const byExp = items.map((_, i) => i).sort((a, b) => items[a].exposure - items[b].exposure);
   const shortest = byExp[0], longest = byExp[byExp.length - 1];
   const integer = items.every((it) => Math.abs(it.dx) < 1e-6 && Math.abs(it.dy) < 1e-6);

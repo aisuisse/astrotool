@@ -32,3 +32,9 @@ Own implementations (no third-party code): SER reader/writer, AVI reader (RIFF/O
 | Samsung SRW packed 12 bit (NX100 family), Fujifilm RAF with Bayer sensor (packed 14 bit) | no compression: bit packing, colour pattern, black level and visible area were determined from the files themselves against the camera's own JPEG |
 
 If a second licence is ever offered, these decoders are the parts to review first.
+
+## Published methods (own implementations)
+
+| Part | Basis |
+|---|---|
+| Camera tone curve from an exposure bracket (`fitResponse` in `web/src/engine/totality.ts`, 0.33) | radiometric self-calibration as described in the literature – P. Debevec & J. Malik, "Recovering High Dynamic Range Radiance Maps from Photographs" (SIGGRAPH 1997: smooth log response, least squares) and T. Mitsunaga & S. Nayar, "Radiometric Self Calibration" (CVPR 1999: response from pairs of exposures). Own formulation with pixel pairs, no code taken from either |

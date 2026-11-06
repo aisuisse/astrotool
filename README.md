@@ -60,7 +60,7 @@ The app is not code-signed yet, so Windows SmartScreen may show *"Windows protec
 | Write straight to disk while processing (SER to a file, frames to a folder), also when saving a range from the viewer – no memory limit; ZIP64 for archives > 4 GB | – | ✅ |
 | Full-depth frames: 16-bit PNG, 16-bit TIFF and FITS (capture time, exposure, Bayer pattern in the header) for Siril, PixInsight, DeepSkyStacker | TIFF, FITS | ✅ |
 | Eclipse mode: circle fit to the solar limb, plausibility check on the radius | – (new) | ✅ |
-| Totality: alignment on the lunar limb, exposure brackets merged to HDR, sky glow and its gradient removed (0.23) | – (new) | ✅ |
+| Totality: alignment on the lunar limb, exposure brackets merged to HDR, sky glow and its gradient removed (0.23); the camera's tone curve is measured from each bracket, so camera JPEGs blend without rings, and false limbs around the contacts (crescent, diamond ring, overexposed inner corona) are rejected (0.33) | – (new) | ✅ |
 | Eclipse phase montage: selected frames as an arc (path of the sun), row or grid, totality in the middle, time under each disc, one large PNG | – (new) | ✅ |
 | Time-lapse: HEVC, H.264, WebM, GIF; frame rate, hold last frame, ping-pong, time and title overlay | `-anim_fwd -anim_rev -anim_fwd_lf_rep= -fps_rate= -gif` | ✅ |
 | Import PIPP option files (`.pof`) | – | ✅ |

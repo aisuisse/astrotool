@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toLum } from "../src/engine/image";
 import { SerColor, type Frame } from "../src/engine/ser";
-import { bracketGroups, fitMoonDisc, fitMoonInPartial, fitSkyModel, mergeHdr } from "../src/engine/totality";
+import { bracketGroups, fitMoonDisc, fitMoonInPartial, fitResponse, fitSkyModel, mergeHdr, type BracketFrame } from "../src/engine/totality";
 import { fitSunDisc } from "../src/engine/limb";
 import { defaultOptions, detect, processSource, rejectRadiusOutliers, rejectSunInsideTotality, rejectSunNearTotality, type FrameResult, type ProcessOptions } from "../src/engine/pipeline";
 import { ImageSequenceSource } from "../src/engine/source";
@@ -346,3 +346,58 @@ describe("Sonnenmitte in der Totalität", () => {
   }, 60_000);
 });
 
+describe("Kennlinie der Kamera aus der Belichtungsreihe", () => {
+  const N = 160;
+  /** Leuchtdichte: glatter Verlauf über rund drei Zehnerpotenzen (Mitte hell, aussen dunkel), wie Korona */
+  const radiance = (x: number, y: number) => 0.6 * Math.exp(-Math.hypot(x - N / 2, y - N / 2) / 22) + 0.0008;
+  /** Kamera mit eigener Tonkurve (S-Kurve über Gamma 2.2, nicht sRGB), 8 bit mit etwas Rauschen */
+  const camera = (L: number) => { const y = Math.min(1, L) ** (1 / 2.2); return Math.min(1, Math.max(0, y - (0.35 * Math.sin(2 * Math.PI * y)) / (2 * Math.PI))); };
+  const cameraInv = (v: number) => { let lo = 0, hi = 1; for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (camera(m) < v) lo = m; else hi = m; } return (lo + hi) / 2; };
+  const srgbEnc = (L: number) => { const c = Math.min(1, L); return c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055; };
+  let seed = 7;
+  const noise = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff - 0.5) * 1.2;
+  function bracket(enc: (L: number) => number, exposures: number[]): BracketFrame[] {
+    return exposures.map((t) => {
+      const data = new Uint8Array(N * N * 3);
+      for (let y = 0; y < N; y++)
+        for (let x = 0; x < N; x++) {
+          const v = Math.round(enc(radiance(x, y) * t) * 255 + noise());
+          for (let c = 0; c < 3; c++) data[(y * N + x) * 3 + c] = Math.max(0, Math.min(255, v));
+        }
+      return { frame: { width: N, height: N, planes: 3, bitDepth: 8, colorId: SerColor.RGB, data }, exposure: t, dx: 0, dy: 0 };
+    });
+  }
+  const EXP = [0.25, 1, 4, 16];
+
+  it("findet die Tonkurve einer Kamera, die nicht sRGB kodiert", () => {
+    const r = fitResponse(bracket(camera, EXP), 255)!;
+    expect(r).not.toBeNull();
+    expect(r.error).toBeLessThan(0.3 * r.srgbError);
+    // Form der Kurve (bis auf den Massstab, der durch g(1) = 1 festliegt) wie die wahre Umkehrfunktion
+    for (const v of [0.15, 0.3, 0.5, 0.7, 0.85]) {
+      const got = r.lut[Math.round(v * 255)] / r.lut[Math.round(0.5 * 255)];
+      const want = cameraInv(v) / cameraInv(0.5);
+      expect(Math.abs(Math.log(got / want))).toBeLessThan(0.12);
+    }
+  });
+
+  it("bleibt bei sRGB, wenn die Bilder damit schon zusammenpassen", () => {
+    expect(fitResponse(bracket(srgbEnc, EXP), 255)).toBeNull();
+  });
+
+  it("ohne genug Überlappung (ein Bild, oder Belichtungen weit auseinander): keine Kennlinie", () => {
+    expect(fitResponse(bracket(camera, [1]), 255)).toBeNull();
+    expect(fitResponse(bracket(camera, [0.01, 100]), 255)).toBeNull();
+  });
+
+  it("HDR wie mit der wahren Kennlinie: Bilder passen aneinander, kein Ring an den Übergängen", () => {
+    // Ideal: dieselbe Szene, mit genau sRGB kodiert – dort stimmt die Annahme der Zusammenführung exakt
+    const ideal = mergeHdr(bracket(srgbEnc, EXP), { srgb: true, calibrate: false });
+    const items = bracket(camera, EXP);
+    const diff = (f: Frame) => { let s = 0; for (let i = 0; i < f.data.length; i += 3) s += Math.abs(f.data[i + 1] - ideal.data[i + 1]); return s / (f.data.length / 3); };
+    const withCal = diff(mergeHdr(items, { srgb: true }));
+    const without = diff(mergeHdr(items, { srgb: true, calibrate: false }));
+    expect(withCal).toBeLessThan(0.4 * without);
+    expect(withCal).toBeLessThan(4);
+  });
+});
