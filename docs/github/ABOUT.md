@@ -1,6 +1,6 @@
 # Texts for the GitHub repository page
 
-Description and topics were set on GitHub on 3 Nov 2026 (repository still private). Website, social preview and release remain to be done when the repository is made public – see the release checklist in [../reverse-engineering/03-roadmap.md](../reverse-engineering/03-roadmap.md).
+Description and topics were set on GitHub on 3 Nov 2026. The repository is public; the website field points to the latest release, and the social preview image was uploaded on 6 Nov 2026. Release checklist: [../reverse-engineering/03-roadmap.md](../reverse-engineering/03-roadmap.md).
 
 ## Description (About box, max. 350 characters)
 

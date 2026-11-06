@@ -84,7 +84,7 @@ Stand 04.11.2026 (0.25.0). **Veröffentlicht am 04.11.2026:** Repo öffentlich, 
 - [x] Vollständiger Testdurchgang der .exe – zuletzt 0.25.0, 40/40, 04.11.2026, `scripts/app-fulltest.mjs`
 - [ ] Installer einmal auf einem frischen Windows-Benutzerkonto durchspielen – Anleitung in [windows-app.md](../windows-app.md#installer-test-auf-einem-frischen-windows-konto-von-hand)
 - [x] Bildschirmfotos im README neu aufgenommen (06.11.2026, 0.31, englische Oberfläche, `scripts/app-screenshots.mjs`): Planet, Stapel mit WinJUPOS-Namen, Betrachter, Nachtmodus, Finsternis, Werkzeuge – nur künstliche Jupiter-Aufnahme und eigene Finsternisbilder, Benutzerpfad durch `<user>` ersetzt. Showcase (privat) noch nicht
-- [ ] Social-Preview-Bild hochladen: `docs/github/social-preview.png` (1280 × 640, gezeichnet, ohne Fotos) – nur von Hand möglich: GitHub → Settings → General → Social preview
+- [x] Social-Preview-Bild hochgeladen (06.11.2026): `docs/github/social-preview.png` (1280 × 640, gezeichnet, ohne Fotos) – nur von Hand möglich: GitHub → Settings → General → Social preview
 
 ### Ablauf beim Veröffentlichen
 
