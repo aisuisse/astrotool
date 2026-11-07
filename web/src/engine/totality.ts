@@ -145,7 +145,7 @@ function refineDarkLimb(l: Lum, cx: number, cy: number, r: number, dark: number,
  * Liefert die Mondmitte oder null (zu wenig Mondrand vor der Sonne, z. B. ganz am Anfang der Finsternis).
  * Zusammen mit der Sonnenmitte desselben Bildes ergibt das den Abstand Sonne–Mond, unabhängig vom Nachführfehler.
  */
-export function fitMoonInPartial(l: Lum, sun: { cx: number; cy: number; r: number }, thr: number, opts: { workSize?: number } = {}): { cx: number; cy: number; r: number; rms: number; arc: number } | null {
+export function fitMoonInPartial(l: Lum, sun: { cx: number; cy: number; r: number }, thr: number, opts: { workSize?: number; maxRms?: number } = {}): { cx: number; cy: number; r: number; rms: number; arc: number } | null {
   const f = Math.max(1, Math.ceil(Math.max(l.width, l.height) / (opts.workSize ?? 900)));
   const s = downsample(l, f);
   const { width: w, height: h, data } = s;
@@ -166,7 +166,7 @@ export function fitMoonInPartial(l: Lum, sun: { cx: number; cy: number; r: numbe
   if (!c || c.r < 0.85 * sr || c.r > 1.25 * sr) return null;
   const inSun = (x: number, y: number) => Math.hypot(x - sun.cx, y - sun.cy) < 0.96 * sun.r;
   const fine = refineDarkLimb(l, c.cx * f - 0.5, c.cy * f - 0.5, c.r * f, thr, inSun, 20);
-  if (!fine.found || fine.r < 0.85 * sun.r || fine.r > 1.25 * sun.r || fine.rms > Math.max(1.5, 0.01 * sun.r)) return null;
+  if (!fine.found || fine.r < 0.85 * sun.r || fine.r > 1.25 * sun.r || fine.rms > (opts.maxRms ?? Math.max(1.5, 0.01 * sun.r))) return null;
   return { cx: fine.cx, cy: fine.cy, r: fine.r, rms: fine.rms, arc: fine.visible };
 }
 

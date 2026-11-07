@@ -768,6 +768,41 @@ try {
     return { list: row.list, saved, text: r.text.slice(0, 300) };
   });
 
+  // ---------- Einfach-Modus: Fotos hinein, Film heraus (jedes zweite Bild – noch unregelmässigere Abstände) ----------
+  if (imageDir) await test("Einfach-Modus: Finsternis-Fotos → Film (MP4 1080 × 1080, zeittreu mit Zwischenbildern)", async () => {
+    const files = readdirSync(imageDir).filter((f) => /\.jpe?g$/i.test(f)).sort().filter((_, i) => i % 2 === 0).map((f) => resolve(join(imageDir, f)));
+    await ev(`document.querySelector('[data-ui="easy"]').click(); true`);
+    await sleep(500);
+    const ui = await ev(`({ easy: document.body.classList.contains('easy'), shown: !document.getElementById('easy').hidden, expertHidden: getComputedStyle(document.querySelector('main > .stage')).display === 'none' })`);
+    check(ui.easy && ui.shown && ui.expertHidden, `Umschalten: ${JSON.stringify(ui)}`);
+    await setFiles("#easyFiles", files);
+    await waitFor(`!document.getElementById('easyReady').hidden && /${files.length}/.test(document.getElementById('easyInfo').innerText)`, 120_000, "Fotos lesen");
+    const info = await ev(`document.getElementById('easyInfo').innerText.replace(/\\n/g, ' | ')`);
+    await ev(`document.getElementById('easyRun').click(); true`);
+    const t0 = Date.now();
+    for (;;) {
+      const st = await ev(`({ done: !document.getElementById('easyResult').hidden, err: document.getElementById('easyError').innerText })`);
+      if (st.err) throw new Error("App meldet: " + st.err);
+      if (st.done) break;
+      if (Date.now() - t0 > 900_000) throw new Error("Zeitüberschreitung beim Film");
+      await sleep(1000);
+    }
+    const text = await ev(`document.getElementById('easyResult').innerText`);
+    const b64 = await ev(`__t.base64('#easyResult a[download]', '\\\\.mp4$')`);
+    const p = join(outDir, "einfach_film.mp4");
+    writeFileSync(p, Buffer.from(b64, "base64"));
+    let probe = null;
+    try { probe = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name,width,height,avg_frame_rate,nb_frames:format=duration", "-of", "json", p]).toString()); } catch { /* ffprobe fehlt */ }
+    const s = probe?.streams?.[0], dur = Number(probe?.format?.duration);
+    check(!probe || (s.width === 1080 && s.height === 1080 && s.codec_name === "h264" && dur > 20 && dur < 35), `Film: ${JSON.stringify(probe)}`);
+    check(new RegExp(`(of|von) ${files.length} (photos|Fotos)`).test(text) && /(calculated|berechnet)/.test(text), `Ergebnis: ${text.slice(0, 300)}`);
+    // zurück in den Profi-Modus (für die folgenden Tests und den nächsten Start)
+    await ev(`document.querySelector('[data-ui="expert"]').click(); true`);
+    await sleep(500);
+    check(!(await ev(`document.body.classList.contains('easy')`)), "zurück zu Profi");
+    return { files: files.length, info, seconds: (Date.now() - t0) / 1000, text: text.slice(0, 300), probe };
+  });
+
   if (fzDir) await test("FITS komprimiert (.fits.fz): GONG-Finsternis, Sonnenrand → PNG", async () => {
     const all = readdirSync(fzDir).filter((f) => /\.fits\.fz$/i.test(f)).sort();
     const files = all.filter((_, i) => i % 6 === 0).map((f) => resolve(join(fzDir, f))); // Vollscheibe bis tiefe Phase

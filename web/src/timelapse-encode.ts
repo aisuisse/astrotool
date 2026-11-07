@@ -5,6 +5,7 @@ import type { Frame } from "./engine/ser";
 import { msg } from "./i18n";
 import { setMp4CreationTime } from "./engine/mp4time";
 import { buildSequence, constantRateCounts, isMp4, outputSize, ticksToClock, videoFrameRate, type TimelapseOptions } from "./engine/timelapse";
+import { blendFrames, defaultMovie, fillMoonTrack, planMovie, synthFrame, type MovieFrame, type MovieStep, type Rgba } from "./engine/eclipsemovie";
 
 /** Ein konkreter Encoder-Plan. Die Codec-Strings legen Profil und Level fest, die Handys sicher abspielen. */
 interface VideoPlan {
@@ -71,20 +72,43 @@ export interface TimelapseResult {
   seconds: number;
   /** HEVC war gewünscht, der Browser konnte es nicht – es wurde H.264 verwendet. */
   fallback?: boolean;
+  /** zeittreuer Film: Anzahl gerechneter bzw. überblendeter Videobilder */
+  synthesized?: number;
+  blended?: number;
 }
+
+/** Ein Abschnitt des Videos: dasselbe Bild `count` Videobilder lang */
+type Run = { step: MovieStep; count: number };
 
 /** Sammelt die fertig zugeschnittenen Bilder (verlustfrei als PNG) und baut daraus den Zeitraffer. */
 export class TimelapseRecorder {
-  private frames: { blob: Blob; stamp?: bigint }[] = [];
+  private frames: { blob: Blob; stamp?: bigint; meta?: Omit<MovieFrame, "t"> }[] = [];
   private width = 0;
   private height = 0;
 
-  async add(f: Frame, stamp?: bigint): Promise<void> {
+  /** meta: Lage von Sonne und Mond im Bild (für Zwischenbilder im zeittreuen Film) */
+  async add(f: Frame, stamp?: bigint, meta?: Omit<MovieFrame, "t">): Promise<void> {
     this.width = f.width;
     this.height = f.height;
     const c = new OffscreenCanvas(f.width, f.height);
     c.getContext("2d")!.putImageData(new ImageData(frameToRGBA8(f), f.width, f.height), 0, 0);
-    this.frames.push({ blob: await c.convertToBlob({ type: "image/png" }), stamp });
+    this.frames.push({ blob: await c.convertToBlob({ type: "image/png" }), stamp, meta });
+  }
+
+  /** Bildpunkte eines gesammelten Bildes (die letzten wenigen bleiben im Speicher) */
+  private cache = new Map<number, Rgba>();
+  private async pixels(idx: number): Promise<Rgba> {
+    const hit = this.cache.get(idx);
+    if (hit) return hit;
+    const bmp = await createImageBitmap(this.frames[idx].blob);
+    const c = new OffscreenCanvas(this.width, this.height);
+    const g = c.getContext("2d", { willReadFrequently: true })!;
+    g.drawImage(bmp, 0, 0);
+    bmp.close();
+    const im = { width: this.width, height: this.height, data: g.getImageData(0, 0, this.width, this.height).data };
+    if (this.cache.size >= 3) this.cache.delete(this.cache.keys().next().value!);
+    this.cache.set(idx, im);
+    return im;
   }
 
   get count(): number {
@@ -103,25 +127,56 @@ export class TimelapseRecorder {
     if (this.frames.every((f) => f.stamp !== undefined && f.stamp > 0n)) {
       this.frames.sort((a, b) => (a.stamp! < b.stamp! ? -1 : a.stamp! > b.stamp! ? 1 : 0));
     }
-    const seq = buildSequence(this.frames.length, o);
-    // gleiche aufeinanderfolgende Bilder zusammenfassen → ein Bild mit längerer Dauer
-    const runs: { idx: number; count: number }[] = [];
-    for (const i of seq) {
-      const last = runs[runs.length - 1];
-      if (last && last.idx === i) last.count++;
-      else runs.push({ idx: i, count: 1 });
+    const stamps = this.frames.map((f) => f.stamp ?? 0n);
+    const real = o.timing === "real" && this.frames.length > 1 && stamps.every((s) => s > 0n);
+    // fpsIn: Bildrate, in der die Dauer der Abschnitte gezählt wird
+    const fpsIn = real ? defaultMovie.fps : o.fps;
+    const runs: Run[] = [];
+    let synthesized = 0, blended = 0;
+    let movie: MovieFrame[] = [];
+    if (real) {
+      const s0 = stamps[0];
+      movie = this.frames.map((f, i) => ({ t: Number(stamps[i] - s0) / 1e7, ...structuredClone(f.meta ?? { kind: "none" as const }) }));
+      fillMoonTrack(movie);
+      const steps = planMovie(movie, {
+        ...defaultMovie, seconds: o.seconds, holdEnd: o.holdLastSeconds,
+      });
+      for (const s of steps) {
+        const last = runs[runs.length - 1];
+        if (last && s.mode === "real" && last.step.mode === "real" && last.step.a === s.a) last.count++;
+        else runs.push({ step: s, count: 1 });
+        if (s.mode === "synth") synthesized++;
+        if (s.mode === "blend") blended++;
+      }
+    } else {
+      // gleiche aufeinanderfolgende Bilder zusammenfassen → ein Bild mit längerer Dauer
+      for (const i of buildSequence(this.frames.length, o)) {
+        const last = runs[runs.length - 1];
+        if (last && last.step.a === i) last.count++;
+        else runs.push({ step: { mode: "real", a: i, t: 0 }, count: 1 });
+      }
     }
+    const seqLength = runs.reduce((a, r) => a + r.count, 0);
     const [W, H] = outputSize(this.width, this.height, o);
     const canvas = new OffscreenCanvas(W, H);
     const g = canvas.getContext("2d", { willReadFrequently: o.format === "gif" || !!native })!;
     g.imageSmoothingQuality = "high";
 
-    const draw = async (idx: number) => {
-      const bmp = await createImageBitmap(this.frames[idx].blob);
+    const mix = real ? new OffscreenCanvas(this.width, this.height) : null;
+    const draw = async (run: Run) => {
+      const s = run.step, idx = s.a;
       g.fillStyle = "#000";
       g.fillRect(0, 0, W, H);
-      g.drawImage(bmp, 0, 0, W, H);
-      bmp.close();
+      if (s.mode === "real") {
+        const bmp = await createImageBitmap(this.frames[idx].blob);
+        g.drawImage(bmp, 0, 0, W, H);
+        bmp.close();
+      } else {
+        const A = await this.pixels(s.a), B = await this.pixels(s.b);
+        const px = s.mode === "synth" ? synthFrame(A, B, movie[s.a], movie[s.b], s.w) : blendFrames(A, B, s.w);
+        mix!.getContext("2d")!.putImageData(new ImageData(px, this.width, this.height), 0, 0);
+        g.drawImage(mix!, 0, 0, W, H);
+      }
       const size = Math.max(12, Math.round(H * 0.045));
       g.font = `600 ${size}px system-ui, "Segoe UI", sans-serif`;
       g.textBaseline = "alphabetic";
@@ -146,35 +201,37 @@ export class TimelapseRecorder {
         g.font = `600 ${size}px system-ui, "Segoe UI", sans-serif`;
         g.lineWidth = Math.max(2, size / 6);
       }
-      const clock = o.showTime ? ticksToClock(this.frames[idx].stamp) : "";
+      // Zwischenbilder: Uhrzeit zu ihrer Zeit (läuft gleichmässig weiter)
+      const stamp = real ? stamps[0] + BigInt(Math.round(s.t * 1e7)) : this.frames[idx].stamp;
+      const clock = o.showTime ? ticksToClock(stamp) : "";
       if (clock) text(clock, pad, H - pad);
     };
 
     const total = runs.length;
-    const seconds = seq.length / o.fps;
+    const seconds = seqLength / fpsIn;
     if (o.format === "gif") {
       // Eine gemeinsame Farbpalette aus Stichproben verhindert Flackern zwischen den Bildern
       const samples = [0, Math.floor(runs.length / 3), Math.floor((2 * runs.length) / 3), runs.length - 1];
       const sampleData = new Uint8ClampedArray(samples.length * W * H * 4);
       for (let k = 0; k < samples.length; k++) {
-        await draw(runs[samples[k]].idx);
+        await draw(runs[samples[k]]);
         sampleData.set(g.getImageData(0, 0, W, H).data, k * W * H * 4);
       }
       const palette = quantize(sampleData, 256);
       const gif = GIFEncoder();
       for (let k = 0; k < runs.length; k++) {
-        await draw(runs[k].idx);
+        await draw(runs[k]);
         const index = applyPalette(g.getImageData(0, 0, W, H).data, palette);
-        gif.writeFrame(index, W, H, { palette: k === 0 ? palette : undefined, delay: (runs[k].count * 1000) / o.fps, repeat: 0 });
+        gif.writeFrame(index, W, H, { palette: k === 0 ? palette : undefined, delay: (runs[k].count * 1000) / fpsIn, repeat: 0 });
         onProgress(k + 1, total);
       }
       gif.finish();
       const bytes = gif.bytes();
-      return { blob: new Blob([bytes.slice().buffer as ArrayBuffer], { type: "image/gif" }), fileName: `${baseName}_timelapse.gif`, codec: "GIF", frames: seq.length, seconds };
+      return { blob: new Blob([bytes.slice().buffer as ArrayBuffer], { type: "image/gif" }), fileName: `${baseName}_timelapse.gif`, codec: "GIF", frames: seqLength, seconds, synthesized, blended };
     }
 
     // MP4 zum Teilen (WhatsApp, Google Fotos): konstante Bildrate, "fast start", Profile, die Handys abspielen.
-    const outFps = videoFrameRate(o.fps);
+    const outFps = real ? defaultMovie.fps : videoFrameRate(o.fps);
     const highRate = outFps > 30;
     const plans: VideoPlan[] = [];
     if (o.format === "mp4-hevc") plans.push(HEVC(highRate));
@@ -186,9 +243,9 @@ export class TimelapseRecorder {
     if (o.format === "mp4-hevc" && native && !(await supports(HEVC(highRate), W, H, outFps))) {
       try {
         const { encoder } = await native.begin(W, H, outFps, o.title || undefined, recorded?.toISOString());
-        const counts = constantRateCounts(runs.map((r) => r.count), o.fps, outFps);
+        const counts = constantRateCounts(runs.map((r) => r.count), fpsIn, outFps);
         for (let k = 0; k < runs.length; k++) {
-          await draw(runs[k].idx);
+          await draw(runs[k]);
           if (counts[k] > 0) await native.frame(g.getImageData(0, 0, W, H).data, counts[k]);
           onProgress(k + 1, total);
         }
@@ -197,8 +254,10 @@ export class TimelapseRecorder {
           blob: new Blob([buf], { type: "video/mp4" }),
           fileName: `${baseName}_timelapse.mp4`,
           codec: `H.265/HEVC (FFmpeg ${encoder})`,
-          frames: seq.length,
+          frames: seqLength,
           seconds,
+          synthesized,
+          blended,
         };
       } catch {
         nativeFailed = true; // kein FFmpeg oder Fehler → wie bisher mit H.264 weiter
@@ -228,10 +287,10 @@ export class TimelapseRecorder {
     // Aufnahmedatum und Titel: Google Fotos & Co. sortieren das Video dann beim Aufnahmetag ein.
     output.setMetadataTags({ ...(recorded ? { date: recorded } : {}), ...(o.title ? { title: o.title } : {}) });
     await output.start();
-    const counts = constantRateCounts(runs.map((r) => r.count), o.fps, outFps);
+    const counts = constantRateCounts(runs.map((r) => r.count), fpsIn, outFps);
     let n = 0;
     for (let k = 0; k < runs.length; k++) {
-      await draw(runs[k].idx);
+      await draw(runs[k]);
       // Gleiches Bild mehrfach: kostet bei VBR fast nichts, ergibt aber eine konstante Bildrate.
       for (let j = 0; j < counts[k]; j++, n++) await source.add(n / outFps, 1 / outFps);
       onProgress(k + 1, total);
@@ -244,8 +303,10 @@ export class TimelapseRecorder {
       blob: new Blob([buf], { type: container === "mp4" ? "video/mp4" : "video/webm" }),
       fileName: `${baseName}_timelapse.${container}`,
       codec: plan.label,
-      frames: seq.length,
+      frames: seqLength,
       seconds,
+      synthesized,
+      blended,
       fallback: (o.format === "mp4-hevc" && plan.codec !== "hevc") || nativeFailed,
     };
   }

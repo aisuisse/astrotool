@@ -1,6 +1,6 @@
 [package]
 name = "astrotool"
-version = "0.33.0"
+version = "0.34.0"
 description = "Astrotool – pre-processing for planetary, lunar, solar and eclipse imaging"
 authors = ["aisuisse"]
 license = "GPL-3.0-or-later"

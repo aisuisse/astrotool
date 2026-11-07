@@ -9,7 +9,7 @@ import { initTools, isDesktopApp } from "./tools";
 import { initPlayer } from "./player";
 import { filesOf, forgetRecent, recentList, recentSupported, rememberRecent, type RecentEntry } from "./recent";
 import type { CalKind, FileInfo, FromWorker, OutputFormat, ToWorker } from "./worker";
-import { groupBatch, VIDEO_RE, type BatchItem, type PickedFile } from "./batchgroups";
+import { groupBatch, IMAGE_RE, VIDEO_RE, type BatchItem, type PickedFile } from "./batchgroups";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -55,6 +55,7 @@ function setLang(l: Lang) {
   syncEdit();
   renderBatch();
   if (lastBatch && !busy) renderBatchResult();
+  renderEasy();
 }
 $("lang").addEventListener("click", () => setLang(lang === "en" ? "de" : "en"));
 
@@ -571,17 +572,26 @@ async function readDropped(entries: FileSystemEntry[]): Promise<PickedFile[]> {
 }
 
 const drop = $("drop");
+const dropZones = [drop, $("easyDrop")];
 for (const target of [drop, document.body]) {
   target.addEventListener("dragover", (e) => {
     e.preventDefault();
-    drop.classList.add("over");
+    dropZones.forEach((z) => z.classList.add("over"));
   });
-  target.addEventListener("dragleave", () => drop.classList.remove("over"));
+  target.addEventListener("dragleave", () => dropZones.forEach((z) => z.classList.remove("over")));
   target.addEventListener("drop", (e) => {
     e.preventDefault();
-    drop.classList.remove("over");
+    dropZones.forEach((z) => z.classList.remove("over"));
     // Ordner hineingezogen: Einträge gleich im Ereignis holen (später sind sie leer), dann durchgehen
     const entries = [...(e.dataTransfer?.items ?? [])].filter((i) => i.kind === "file").map((i) => i.webkitGetAsEntry?.() ?? null);
+    if (uiEasy) {
+      if (busy) return;
+      if (entries.some((en) => en?.isDirectory)) {
+        $("easyDropTitle").textContent = L("drop.reading");
+        void readDropped(entries.filter((en): en is FileSystemEntry => !!en)).then(openEasy, (err) => showEasyError(String(err)));
+      } else openEasy(Array.from(e.dataTransfer?.files ?? []).map((f) => ({ file: f, path: f.name })));
+      return;
+    }
     if (entries.some((en) => en?.isDirectory)) {
       pendingHandles = null;
       $("drop").querySelector("strong")!.textContent = L("drop.reading");
@@ -1044,6 +1054,7 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       document.title = `${info.name} – Astrotool`;
       setFrame(0);
       player.opened(info, !!batchWait);
+      renderEasy();
       break;
     }
     case "preview": {
@@ -1069,6 +1080,10 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       break;
     }
     case "progress": {
+      if (easyRunning) {
+        easyProgress(m);
+        break;
+      }
       if (player.isExporting()) {
         player.handle(m);
         break;
@@ -1080,6 +1095,10 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
     }
     case "done": {
       finish();
+      if (easyRunning) {
+        easyDone(m);
+        break;
+      }
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       if (tlUrl) URL.revokeObjectURL(tlUrl);
       resultUrl = m.blob ? URL.createObjectURL(m.blob) : null;
@@ -1092,6 +1111,13 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       break;
     }
     case "error":
+      if (uiEasy && (easyRunning || !info)) {
+        finish();
+        easyRunning = false;
+        showEasyError(m.message);
+        renderEasy();
+        break;
+      }
       if (player.isViewing()) {
         player.handle(m);
         break;
@@ -1102,6 +1128,177 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       break;
   }
 };
+
+// ---------- Einfach-Modus: Finsternis-Film mit einem Klick ----------
+/** Einfach-Modus aktiv? (gemerkt pro Browser) */
+let uiEasy = false;
+/** läuft gerade ein Film im Einfach-Modus? Dann gehen Fortschritt und Ergebnis dorthin */
+let easyRunning = false;
+let easyUrls: string[] = [];
+let lastEasy: Extract<FromWorker, { type: "done" }> | null = null;
+
+/** Einstellungen des Einfach-Modus: Finsternis-Vorgabe, Ausschnitt nach Sonnengrösse, Verwackeltes verwerfen */
+function easySettings(title: string): { options: ProcessOptions; timelapse: TimelapseOptions; montage: MontageOptions } {
+  return {
+    options: { ...structuredClone(defaultOptions), ...presets.eclipse, cropAuto: true, rejectBlurred: true, strictSun: true, matchSize: true },
+    timelapse: { ...structuredClone(defaultTimelapse), enabled: true, format: "mp4-h264", timing: "real", seconds: 24, holdLastSeconds: 2.5, width: 1080, upscale: true, showTime: true, title },
+    montage: { ...structuredClone(defaultMontage), enabled: true, title },
+  };
+}
+
+function setUi(easy: boolean) {
+  uiEasy = easy;
+  document.body.classList.toggle("easy", easy);
+  $("easy").hidden = !easy;
+  document.querySelectorAll<HTMLButtonElement>("[data-ui]").forEach((b) => b.classList.toggle("on", (b.dataset.ui === "easy") === easy));
+  try { localStorage.setItem("astrotool-ui", easy ? "easy" : "expert"); } catch { /* egal */ }
+  renderEasy();
+}
+document.querySelectorAll<HTMLButtonElement>("[data-ui]").forEach((b) => b.addEventListener("click", () => { if (!busy) setUi(b.dataset.ui === "easy"); }));
+
+/** Einfach-Modus: alle Bilder als eine Serie (Unterordner, Videos und fremde Dateien werden übergangen) */
+function openEasy(picked: PickedFile[]) {
+  const imgs = picked.filter((p) => IMAGE_RE.test(p.file.name) && !/\.(fits?|fts|fz)$/i.test(p.file.name));
+  lastEasy = null;
+  showEasyError(imgs.length ? null : L("easy.noPhotos"));
+  if (!imgs.length) return;
+  batch = null;
+  renderBatch();
+  info = null;
+  $("easyDropTitle").textContent = L("easy.reading", imgs.length);
+  send({ type: "open", files: imgs.map((p) => p.file), bigEndian: false, rawMode: "preview", mainCamera: true });
+  easyPickedCount = picked.length;
+  renderEasy();
+}
+let easyPickedCount = 0;
+
+function showEasyError(text: string | null) {
+  const el = $("easyError");
+  el.hidden = !text;
+  el.textContent = text ? (text === "@cancelled" ? L("err.cancelled") : M(text)) : "";
+}
+
+function renderEasy() {
+  if (!uiEasy) return;
+  const running = easyRunning;
+  $("easyDrop").hidden = !!info || running || !!lastEasy;
+  $("easyReady").hidden = !info || running || !!lastEasy;
+  $("easyBusy").hidden = !running;
+  $("easyResult").hidden = !lastEasy || running;
+  if (!info) $("easyDropTitle").textContent = L("easy.dropTitle");
+  if (info && !running) {
+    const locale = lang === "de" ? "de-CH" : "en-GB";
+    const rows: [string, string][] = [[L("easy.photos"), info.frameCount.toLocaleString(locale)]];
+    const ts = (s: string) => s.replace("T", " ").slice(0, 16);
+    if (info.firstTimestamp && info.lastTimestamp) rows.push([L("easy.when"), `${ts(info.firstTimestamp)} – ${ts(info.lastTimestamp).slice(11)}`]);
+    if (info.instrument) rows.push([L("info.camera"), info.instrument + (info.telescope ? ` · ${info.telescope}` : "")]);
+    const skipped = (info.skipped?.length ?? 0) + Math.max(0, easyPickedCount - info.frameCount - (info.skipped?.length ?? 0));
+    if (skipped) rows.push([L("easy.notUsed"), L("easy.notUsedText", skipped)]);
+    $("easyInfo").innerHTML = rows.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`).join("");
+    $("easyReady").querySelector(".warn")?.remove();
+    if (!info.hasTimestamps) $("easyRun").insertAdjacentHTML("beforebegin", `<small class="warn">${escapeHtml(L("easy.noTime"))}</small>`);
+  }
+  if (lastEasy && !running) renderEasyDone(lastEasy);
+}
+
+$<HTMLInputElement>("easyFiles").addEventListener("change", (e) => {
+  const input = e.target as HTMLInputElement;
+  openEasy(Array.from(input.files ?? []).map((f) => ({ file: f, path: f.name })));
+  input.value = "";
+});
+$<HTMLInputElement>("easyFolder").addEventListener("change", (e) => {
+  const input = e.target as HTMLInputElement;
+  openEasy(Array.from(input.files ?? []).map((f) => ({ file: f, path: f.webkitRelativePath || f.name })));
+  input.value = "";
+});
+$("easyOther").addEventListener("click", () => resetEasy());
+function resetEasy() {
+  info = null;
+  lastEasy = null;
+  for (const u of easyUrls) URL.revokeObjectURL(u);
+  easyUrls = [];
+  showEasyError(null);
+  renderEasy();
+}
+
+$("easyRun").addEventListener("click", () => {
+  if (!info || busy) return;
+  busy = true;
+  easyRunning = true;
+  showEasyError(null);
+  const s = easySettings($<HTMLInputElement>("easyTitleIn").value.trim());
+  $("easyStep").textContent = L("easy.step.analyse");
+  $("easyBar").style.width = "0%";
+  $("easyCount").textContent = "";
+  renderEasy();
+  send({ type: "process", options: s.options, format: "none", timelapse: s.timelapse, montage: s.montage, nativeHevc: false });
+});
+$("easyCancel").addEventListener("click", () => send({ type: "cancel" }));
+
+function easyProgress(m: Extract<FromWorker, { type: "progress" }>) {
+  $("easyStep").textContent = L(`easy.step.${m.phase}` as I18nKey);
+  $("easyBar").style.width = `${m.total ? (m.done / m.total) * 100 : 0}%`;
+  $("easyCount").textContent = m.phase === "video" ? `${Math.round((m.done / Math.max(1, m.total)) * 100)} %` : `${m.done} / ${m.total}`;
+}
+
+/** Gründe für aussortierte Bilder in einfache Gruppen */
+function easyReason(code: string): I18nKey {
+  const c = code.replace(/^@/, "").split("|")[0];
+  if (c === "bloom" || c === "overexposed") return "easy.why.overexposed";
+  if (c === "blurred") return "easy.why.blurred";
+  if (c === "radiusOutlier" || c === "nearTotality" || c === "totalityNoMoon") return "easy.why.unclear";
+  if (c === "tooDark") return "easy.why.dark";
+  if (c === "unreadable") return "easy.why.unreadable";
+  return "easy.why.noSun";
+}
+
+function easyDone(m: Extract<FromWorker, { type: "done" }>) {
+  busy = false;
+  easyRunning = false;
+  for (const u of easyUrls) URL.revokeObjectURL(u);
+  easyUrls = [];
+  lastEasy = m;
+  if (!m.timelapse) showEasyError(m.timelapseError ?? (m.written ? L("easy.noFilm") : L("easy.nothingUsable")));
+  renderEasy();
+}
+
+function renderEasyDone(m: Extract<FromWorker, { type: "done" }>) {
+  if (!easyUrls.length) {
+    if (m.timelapse) easyUrls.push(URL.createObjectURL(m.timelapse.blob));
+    if (m.montage) easyUrls.push(URL.createObjectURL(m.montage.blob));
+  }
+  const [vUrl, mUrl] = m.timelapse ? easyUrls : [undefined, easyUrls[0]];
+  const groups = new Map<I18nKey, string[]>();
+  for (const r of m.rejected) {
+    const k = easyReason(r.reason);
+    groups.set(k, [...(groups.get(k) ?? []), `${r.name}: ${M(r.reason)}`]);
+  }
+  const other = (info?.skipped?.length ?? 0);
+  // Fotos zählen (eine HDR-Belichtungsreihe ist ein Bild im Film, aber mehrere Fotos)
+  const total = info?.frameCount ?? m.written + m.rejected.length;
+  const used = total - m.rejected.length;
+  const tl = m.timelapse;
+  const parts: string[] = [];
+  if (tl && vUrl) {
+    parts.push(`<video src="${vUrl}" controls loop muted autoplay playsinline></video>
+      <div class="row"><a class="btn primary" href="${vUrl}" download="${escapeHtml(tl.fileName)}">${escapeHtml(L("easy.saveFilm", (tl.blob.size / 1048576).toFixed(1)))}</a>
+      ${m.montage && mUrl ? `<a class="btn" href="${mUrl}" download="${escapeHtml(m.montage.fileName)}">${escapeHtml(L("easy.saveMontage"))}</a>` : ""}
+      <button class="btn" id="easyAgain">${escapeHtml(L("easy.again"))}</button></div>
+      <strong>${escapeHtml(L("easy.filmInfo", tl.seconds.toFixed(0), used, total))}</strong>`);
+    if (tl.synthesized) parts.push(`<small>${escapeHtml(L("easy.synth", tl.synthesized))}</small>`);
+  } else parts.push(`<div class="row"><button class="btn" id="easyAgain">${escapeHtml(L("easy.again"))}</button></div>`);
+  if (groups.size || other) {
+    const items = [...groups].map(([k, v]) => `<li>${escapeHtml(L(k, v.length))}</li>`);
+    if (other) items.push(`<li>${escapeHtml(L("easy.why.otherCamera", other))}</li>`);
+    parts.push(`<div><small>${escapeHtml(L("easy.sortedOut"))}</small><ul>${items.join("")}</ul></div>`);
+    parts.push(`<details><summary>${escapeHtml(L("easy.details"))}</summary><small>${[...groups.values()].flat().map(escapeHtml).join("<br>")}${other ? "<br>" + info!.skipped!.map((s) => escapeHtml(`${s.name}: ${s.camera || L("easy.unknownCamera")}`)).join("<br>") : ""}</small></details>`);
+  }
+  if (m.montage && mUrl) parts.push(`<img src="${mUrl}" alt="" />`);
+  $("easyResult").innerHTML = parts.join("");
+  $("easyAgain")?.addEventListener("click", () => resetEasy());
+}
+
+try { if (localStorage.getItem("astrotool-ui") === "easy") setUi(true); } catch { /* egal */ }
 
 // ---------- Nachtmodus ----------
 const night = $("night");

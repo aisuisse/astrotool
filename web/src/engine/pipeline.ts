@@ -4,11 +4,12 @@ import { cropFrame, cropLum, cropOrigin, detectObject, toLum, type Detection, ty
 import { fitSunDisc, percentile, sample, type DiscFit } from "./limb";
 import { bracketGroups, fitMoonDisc, fitMoonInPartial, mergeHdr, type BracketFrame } from "./totality";
 import { quality, type QualityOptions, defaultQuality } from "./quality";
+import { limbWidth } from "./eclipsemovie";
 import { SerColor, SerReader, SerWriter, type Frame } from "./ser";
 import { debayer, patternFromColorId, type BayerPattern } from "./debayer";
 import { serSource, type FrameSource } from "./source";
 import { SurfaceTracker, type SurfaceBox, type SurfaceMotion } from "./surface";
-import { bayerAfterTransform, hasTransform, rotatedCrop, transformFrame, transformedSize, type TransformOptions } from "./transform";
+import { bayerAfterTransform, hasTransform, resize, rotatedCrop, transformFrame, transformedSize, type TransformOptions } from "./transform";
 import type { WinJuposOptions } from "./winjupos";
 import { isBayer } from "./ser";
 import { msg } from "../i18n";
@@ -75,6 +76,28 @@ export interface ProcessOptions extends TransformOptions, WinJuposOptions {
    * Abstand Sonne–Mond in den partiellen Phasen davor und danach. So springt das Bild am 2./3. Kontakt nicht.
    */
   totalitySunCentre: boolean;
+  /**
+   * Verwackelte oder unscharfe Bilder verwerfen (Mittelpunkt "disc"): Der Sonnenrand ist deutlich breiter als in
+   * den zeitlich nächsten Bildern derselben Serie. Verglichen wird innerhalb der Serie, damit Dunst oder eine
+   * überbelichtete Sonne (Rand immer etwas breit) nicht alles verwerfen.
+   */
+  rejectBlurred: boolean;
+  /**
+   * Ausschnitt nach der Grösse der Sonne wählen (Mittelpunkt "disc"): mit Totalität Platz für die Korona
+   * (5 Sonnenradien), sonst etwas Rand um die Scheibe (2.6 Radien). cropWidth/cropHeight werden dann ersetzt.
+   */
+  cropAuto: boolean;
+  /**
+   * Einfach-Modus: Sonne streng prüfen. Bilder ohne Sonne (Landschaft, Personen, Himmel) werden verworfen; bei
+   * überstrahlter Sonne in einem grossen Lichtschein (Handy ohne Filter) wird am gesättigten Kern gemessen.
+   */
+  strictSun: boolean;
+  /**
+   * Sonne in allen Bildern gleich gross (Mittelpunkt "disc"): Wer mit dem Handy fotografiert, zoomt mal mehr, mal
+   * weniger. Jedes Bild wird so vergrössert oder verkleinert, dass die Sonne so gross ist wie im Median der Serie.
+   * Verworfen werden dann nur Bilder, deren Sonnengrösse zu keinem Nachbarbild passt (überstrahlt, Wolken).
+   */
+  matchSize: boolean;
 }
 
 export const defaultOptions: ProcessOptions = {
@@ -105,6 +128,10 @@ export const defaultOptions: ProcessOptions = {
   debayerSer: false,
   hdr: false,
   totalitySunCentre: true,
+  rejectBlurred: false,
+  cropAuto: false,
+  strictSun: false,
+  matchSize: false,
   mono: false,
   flipH: false,
   flipV: false,
@@ -187,8 +214,17 @@ export interface FrameDetection extends Detection {
   /** kind: "sun" = Sonnenrand (partielle Phase), "moon" = Mondrand in der Korona (Totalität) */
   disc?: {
     cx: number; cy: number; r: number; visibleLimb: number; rms: number; kind: "sun" | "moon";
+    /** partielle Phase: Breite des Sonnenrands in Pixel (Mass für Schärfe, siehe limbWidth) */
+    limbWidth?: number;
+    /** strictSun: sieht nach Sonne aus (nicht zu gross, kaum Helles daneben) */
+    plausible?: boolean;
     /** partielle Phase: Lage des Mondes vor der Sonne (innere Kante der Sichel) */
     moon?: { cx: number; cy: number; r: number };
+    /**
+     * partielle Phase, Mondrand nur unscharf messbar (überstrahlte Sichel, Dunst): Lage mit grösserer Streuung –
+     * genug für Zwischenbilder im Film, nicht für die Sonnenmitte in der Totalität
+     */
+    moonLoose?: { cx: number; cy: number; r: number };
     /** Totalität: geschätzte Sonnenmitte (aus dem Abstand Sonne–Mond der partiellen Phasen) */
     sun?: { cx: number; cy: number };
   };
@@ -219,6 +255,10 @@ export interface FrameResult {
   score: number;
   /** Bei der Ausgabe: dieses Bild steht für die ganze HDR-Belichtungsreihe (Frame-Indizes) */
   hdrGroup?: number[];
+  /** Bei der Ausgabe: linke obere Ecke des Ausschnitts im Originalbild (für Lage von Sonne und Mond im Ausschnitt) */
+  origin?: [number, number];
+  /** matchSize: Vergrösserung dieses Bildes, damit die Sonne so gross ist wie im Median der Serie */
+  zoom?: number;
 }
 
 export interface ProcessReport {
@@ -248,7 +288,13 @@ function outSize(src: FrameSource, o: ProcessOptions): [number, number] {
 export function detect(lum: Lum, o: ProcessOptions): FrameDetection {
   const det: FrameDetection = detectObject(lum, { threshold: o.threshold ?? undefined });
   if (o.centreMode === "disc" && det.found) {
-    const [fit, kind] = limbFit(lum, o);
+    let [fit, kind] = limbFit(lum, o);
+    // Einfach-Modus: überstrahlte Sonne im grossen Lichtschein (Handy ohne Filter, herangezoomt) – die Schwelle bei
+    // halber Höhe liegt dann im Lichtschein, der „Rand“ wäre der Rand des Scheins. Gemessen wird am gesättigten Kern.
+    if (o.strictSun && fit.found && kind === "sun" && det.maxValue >= 0.98 && saturatedShare(lum, fit) < 0.3) {
+      const core = fitSunDisc(lum, { threshold: 0.9 });
+      if (core.found && core.r < 0.7 * fit.r) fit = core;
+    }
     if (fit.found) {
       det.disc = { cx: fit.cx, cy: fit.cy, r: fit.r, visibleLimb: fit.visibleLimb, rms: fit.rms, kind };
       det.size = Math.round(2 * fit.r);
@@ -256,9 +302,50 @@ export function detect(lum: Lum, o: ProcessOptions): FrameDetection {
         const m = fitMoonInPartial(lum, fit, fit.threshold);
         if (m) det.disc.moon = { cx: m.cx, cy: m.cy, r: m.r };
       }
+      if (kind === "sun" && !det.disc.moon) {
+        const m = fitMoonInPartial(lum, fit, fit.threshold, { maxRms: Math.max(4, 0.025 * fit.r) });
+        if (m) det.disc.moonLoose = { cx: m.cx, cy: m.cy, r: m.r };
+      }
+      if (kind === "sun") det.disc.limbWidth = limbWidth(lum, fit, det.disc.moon) ?? undefined;
+      // Ist das überhaupt die Sonne? Deutlich kleiner als das Bild, und fast alles Helle gehört zu ihr
+      // (Landschaft, Himmel, Personen: helle Flächen überall)
+      if (o.strictSun && kind === "sun") {
+        const b = brightOutside(lum, fit);
+        // Ausnahme für die dünne Sichel kurz vor der Totalität: wenig Helles in der Sichel, daneben etwas Dunst
+        det.disc.plausible = fit.r <= 0.45 * Math.min(lum.width, lum.height) && (b.share <= 0.3 || (fit.visibleLimb <= 0.45 && b.perDisc <= 0.1));
+      }
     }
   }
   return det;
+}
+
+/** Anteil gesättigter Bildpunkte (≥ 0.98) in der Scheibe */
+function saturatedShare(l: Lum, d: { cx: number; cy: number; r: number }): number {
+  const step = Math.max(1, Math.round(d.r / 60));
+  let n = 0, s = 0;
+  for (let y = Math.max(0, Math.floor(d.cy - d.r)); y <= Math.min(l.height - 1, d.cy + d.r); y += step)
+    for (let x = Math.max(0, Math.floor(d.cx - d.r)); x <= Math.min(l.width - 1, d.cx + d.r); x += step) {
+      if (Math.hypot(x - d.cx, y - d.cy) > d.r) continue;
+      n++;
+      if (l.data[y * l.width + x] >= 0.98) s++;
+    }
+  return n ? s / n : 0;
+}
+
+/**
+ * Helle Bildpunkte (über der Schwelle der Randsuche) ausserhalb der Scheibe (1.15 Radien): Anteil an allen hellen
+ * Bildpunkten und Verhältnis zur Fläche der Scheibe
+ */
+export function brightOutside(l: Lum, d: { cx: number; cy: number; r: number; threshold: number }): { share: number; perDisc: number } {
+  const step = Math.max(1, Math.round(Math.min(l.width, l.height) / 600));
+  let inB = 0, outB = 0;
+  for (let y = 0; y < l.height; y += step)
+    for (let x = 0; x < l.width; x += step) {
+      if (l.data[y * l.width + x] <= d.threshold) continue;
+      if (Math.hypot(x - d.cx, y - d.cy) < 1.15 * d.r) inB++;
+      else outB++;
+    }
+  return { share: outB / Math.max(1, inB + outB), perDisc: (outB * step * step) / (Math.PI * d.r * d.r) };
 }
 
 /**
@@ -352,6 +439,7 @@ export function judge(index: number, det: FrameDetection, o: ProcessOptions): Fr
     // oft falsch (echte Serie: r 124 statt 236) – lieber verwerfen als die Sonne springen lassen
     else if (o.centreMode === "disc" && o.centre && det.disc && det.maxValue < 0.08 && det.disc.rms > 2)
       Object.assign(r, { accepted: false, reason: msg("tooDark") });
+    else if (o.strictSun && det.disc?.plausible === false) Object.assign(r, { accepted: false, reason: msg("noSun") });
   }
   // Überbelichtung: Anteil gesättigter Pixel an der Objektfläche. Totalität ausgenommen (Korona gewollt gesättigt).
   if (r.accepted && o.checkObject && o.rejectOverexposed && det.disc?.kind !== "moon") {
@@ -379,7 +467,7 @@ export function rejectRadiusOutliers(results: FrameResult[], window = 4, toleran
     const r = res.det.disc!.r;
     if (Math.abs(r - gmed) > 0.3 * gmed) {
       res.accepted = false;
-      res.reason = msg("radiusOutlier", Math.round(2 * r), Math.round(2 * gmed));
+      res.reason = radiusReason(res, r, gmed);
     }
   }
   withDisc = withDisc.filter((r) => r.accepted);
@@ -392,9 +480,77 @@ export function rejectRadiusOutliers(results: FrameResult[], window = 4, toleran
     const r = radii[i];
     if (Math.abs(r - med) > tolerance * med) {
       res.accepted = false;
-      res.reason = msg("radiusOutlier", Math.round(2 * r), Math.round(2 * med));
+      res.reason = radiusReason(res, r, med);
     }
   });
+}
+
+/**
+ * Mit Zoom-Ausgleich: Die Sonnengrösse darf sich sprunghaft ändern (anderer Zoom), muss aber zu mindestens zwei
+ * der nächsten Bilder passen (± tolerance) – eine Zoomstufe hat meist mehrere Fotos. Ausreisser – überstrahlt, Wolken,
+ * ein falscher Rand – passen zu keinem oder höchstens einem (echte Serie: zwei überstrahlte Bilder mit 4 % Unterschied).
+ */
+export function rejectIsolatedRadii(results: FrameResult[], window = 12, tolerance = 0.06, support = 2): void {
+  const withDisc = results.filter((r) => r.accepted && r.det.disc);
+  if (withDisc.length < 5) return;
+  const radii = withDisc.map((r) => r.det.disc!.r);
+  const bad = withDisc.map((_, i) => {
+    let n = 0;
+    for (let j = Math.max(0, i - window); j <= Math.min(withDisc.length - 1, i + window); j++)
+      if (j !== i && Math.abs(radii[j] - radii[i]) <= tolerance * radii[i]) n++;
+    return n < support;
+  });
+  const sorted = [...radii].sort((a, b) => a - b), med = sorted[sorted.length >> 1];
+  withDisc.forEach((res, i) => {
+    if (!bad[i]) return;
+    res.accepted = false;
+    res.reason = radiusReason(res, radii[i], med);
+  });
+}
+
+/** Zu grosse Scheibe und mindestens die Hälfte davon gesättigt: überstrahlt (zu lange belichtet, Filter verstellt) */
+function radiusReason(res: FrameResult, r: number, med: number): string {
+  const bloom = r > med && res.det.disc?.kind === "sun" && (res.det.overexposedObject ?? 0) >= 0.5;
+  return msg(bloom ? "bloom" : "radiusOutlier", Math.round(2 * r), Math.round(2 * med));
+}
+
+/**
+ * Verwackelte oder unscharfe Bilder: Der Sonnenrand (20–80 %-Anstieg) ist deutlich breiter als im Median der
+ * zeitlich nächsten Bilder. Verglichen wird nur innerhalb der Serie – bei überbelichteter Sonne oder Dunst ist der
+ * Rand in allen Bildern breit (echte Serie ohne Sonnenfilter: 8 px), dann zählt nur, was davon abweicht.
+ */
+export function rejectBlurred(results: FrameResult[], stamps: BigInt64Array | null, factor = 1.6, minExcess = 1.5, neighbours = 8): void {
+  const tOf = (r: FrameResult) => (stamps ? Number(stamps[r.index] - stamps[0]) / 1e7 : r.index);
+  const withW = results.filter((r) => r.accepted && r.det.disc?.kind === "sun" && r.det.disc.limbWidth !== undefined);
+  if (withW.length < 5) return;
+  // auf gleiche Sonnengrösse bezogen (anderer Zoom: Rand im Bild entsprechend breiter oder schmaler)
+  const rs = withW.map((r) => r.det.disc!.r).sort((a, b) => a - b), rMed = rs[rs.length >> 1];
+  const widths = withW.map((r) => ({ t: tOf(r), w: (r.det.disc!.limbWidth! * rMed) / r.det.disc!.r }));
+  withW.forEach((res, i) => {
+    const { t, w } = widths[i];
+    const ref = widths
+      .filter((_, j) => j !== i)
+      .sort((a, b) => Math.abs(a.t - t) - Math.abs(b.t - t))
+      .slice(0, neighbours)
+      .map((x) => x.w)
+      .sort((a, b) => a - b);
+    const med = ref[ref.length >> 1];
+    if (w > factor * med && w > med + minExcess) {
+      res.accepted = false;
+      res.reason = msg("blurred", w.toFixed(1), med.toFixed(1));
+    }
+  });
+}
+
+/** Seitenlänge des Ausschnitts nach der Sonnengrösse (gerade, höchstens so gross wie das Bild) */
+export function autoCropSize(results: FrameResult[], width: number, height: number): number | null {
+  const discs = results.filter((r) => r.accepted && r.det.disc).map((r) => r.det.disc!);
+  if (!discs.length) return null;
+  const sun = discs.filter((d) => d.kind === "sun").map((d) => d.r).sort((a, b) => a - b);
+  const r = (sun.length ? sun : discs.map((d) => d.r).sort((a, b) => a - b))[(sun.length || discs.length) >> 1];
+  const totality = discs.some((d) => d.kind === "moon");
+  const side = Math.round(r * (totality ? 5 : 2.6));
+  return Math.max(64, Math.min(side, width, height)) & ~1;
 }
 
 /**
@@ -537,7 +693,7 @@ export async function processSource(
   shouldCancel: () => boolean = () => false,
 ): Promise<ProcessReport> {
   const indices = frameRange(src, o);
-  const [cw, ch] = outSize(src, o);
+  let [cw, ch] = outSize(src, o);
   const results: FrameResult[] = [];
   // Oberfläche: erstes lesbares Bild ist die Referenz
   let aligner: SurfaceTracker | null = null;
@@ -573,9 +729,27 @@ export async function processSource(
     // zuerst die Bilder rund um die Totalität: falsche Ränder dort liegen oft dicht beisammen, bestätigen sich in
     // der Nachbarprüfung gegenseitig und verdrängen sonst die richtigen Mondrand-Bilder
     rejectSunNearTotality(results, stamps);
-    rejectRadiusOutliers(results);
+    if (o.matchSize) rejectIsolatedRadii(results);
+    else rejectRadiusOutliers(results);
+    if (o.rejectBlurred) rejectBlurred(results, stamps);
     rejectSunInsideTotality(results, stamps);
     if (o.totalitySunCentre) estimateSunInTotality(results, stamps);
+    if (o.matchSize) {
+      const radii = results.filter((r) => r.accepted && r.det.disc).map((r) => r.det.disc!.r).sort((a, b) => a - b);
+      const ref = radii[radii.length >> 1];
+      for (const r of results)
+        if (r.accepted && r.det.disc && ref) {
+          const z = Math.min(5, Math.max(0.2, ref / r.det.disc.r));
+          if (Math.abs(z - 1) > 0.02) r.zoom = z;
+        }
+    }
+    if (o.cropAuto) {
+      const side = autoCropSize(results, src.width, src.height);
+      if (side) {
+        o = { ...o, cropEnabled: true, cropWidth: side, cropHeight: side };
+        [cw, ch] = [side, side];
+      }
+    }
   }
 
   // Auswahl und Reihenfolge
@@ -629,12 +803,23 @@ export async function processSource(
         const d0 = resOf.get(group[0])!.det.disc;
         const [gx0, gy0] = originFor(src, o, resOf.get(group[0])!.det);
         const moon = d0 ? { cx: d0.cx - gx0, cy: d0.cy - gy0, r: d0.r } : undefined;
-        await sink(finishFrame(mergeHdr(parts, { srgb: src.kind === "images" && !src.linear, moon }), o), { ...res, hdrGroup: group }, written.length, ts);
+        await sink(finishFrame(mergeHdr(parts, { srgb: src.kind === "images" && !src.linear, moon }), o), { ...res, hdrGroup: group, origin: [gx0, gy0] }, written.length, ts);
         written.push(res.index);
       }
     } else {
       const frame = await src.readFrame(res.index);
-      await sink(finishFrame(outputCrop(src, frame, o, res.det, cw, ch), o), res, written.length, ts);
+      if (res.zoom && !rotates(o)) {
+        // anderer Zoom: grösseren bzw. kleineren Ausschnitt nehmen und auf die Ausgabegrösse bringen
+        const bw = Math.max(2, Math.round(cw / res.zoom)), bh = Math.max(2, Math.round(ch / res.zoom));
+        const [cx, cy] = centreOf(src, o, res.det);
+        const [x0, y0] = cropOrigin(cx - o.offsetX / res.zoom, cy - o.offsetY / res.zoom, bw, bh, frame.colorId, bayerPatternFor(o, frame) !== null);
+        res.origin = [x0, y0];
+        res.zoom = cw / bw;
+        await sink(finishFrame(resize(colourise(cropFrame(frame, x0, y0, bw, bh), o), cw, ch), o), res, written.length, ts);
+      } else {
+        res.origin = rotates(o) ? undefined : originFor(src, o, res.det);
+        await sink(finishFrame(outputCrop(src, frame, o, res.det, cw, ch), o), res, written.length, ts);
+      }
       written.push(res.index);
     }
     onProgress("write", k + 1, chosen.length);

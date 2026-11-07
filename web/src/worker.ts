@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 // Rechenarbeit läuft hier, damit die Oberfläche flüssig bleibt.
 import { analyseFrame, colouriseOutput, outputColorId, outputSize, processSource, type FrameResult, type ProcessOptions } from "./engine/pipeline";
-import { transformedSize } from "./engine/transform";
+import { hasTransform, transformedSize } from "./engine/transform";
+import { movieMeta } from "./engine/eclipsemovie";
 import { colorName, SerReader, SerWriter, type Frame } from "./engine/ser";
 import { FitsCubeSource, ImageSequenceSource, JoinedSource, serSource, type FrameSource, type ImageDecoder } from "./engine/source";
 import { AviSource } from "./engine/avi";
@@ -39,7 +40,7 @@ async function encodeImage(f: Frame, format: OutputFormat, meta: ImageMeta): Pro
 }
 
 export type ToWorker =
-  | { type: "open"; files: File[]; bigEndian: boolean; rawMode?: "raw" | "preview"; join?: boolean }
+  | { type: "open"; files: File[]; bigEndian: boolean; rawMode?: "raw" | "preview"; join?: boolean; mainCamera?: boolean }
   | { type: "preview"; index: number; options: ProcessOptions }
   | { type: "process"; options: ProcessOptions; format: OutputFormat; folder?: FileSystemDirectoryHandle; target?: FileSystemFileHandle; timelapse: TimelapseOptions; montage?: MontageOptions; nativeHevc?: boolean }
   | { type: "native-reply"; id: number; ok: boolean; result?: unknown; error?: string }
@@ -78,6 +79,8 @@ export interface FileInfo {
   rawFormat: string;
   /** "CR3" / "RAF": komprimierte Sensordaten nicht lesbar – Kamerabild verwendet, Hinweis auf DNG */
   rawHint: string | null;
+  /** Bildserie mit mainCamera: nicht verwendete Bilder anderer Kameras */
+  skipped?: { name: string; camera: string }[];
 }
 
 export interface PreviewDetection {
@@ -129,7 +132,7 @@ export type FromWorker =
       discStats: { meanR: number; maxRms: number } | null;
       /** Totalität: Bilder am Mondrand, zusammengefasste Belichtungsreihen */
       totality: { frames: number; hdrGroups: number } | null;
-      timelapse: { blob: Blob; fileName: string; codec: string; frames: number; seconds: number; fallback?: boolean } | null;
+      timelapse: { blob: Blob; fileName: string; codec: string; frames: number; seconds: number; fallback?: boolean; synthesized?: number; blended?: number } | null;
       timelapseError: string | null;
       montage: { blob: Blob; fileName: string; width: number; height: number; frames: number } | null;
       montageError: string | null;
@@ -187,7 +190,7 @@ async function openVideo(f: File, bigEndian: boolean): Promise<{ src: FrameSourc
  * Dateien öffnen wie beim Laden der Aufnahme: eine SER/ein Video, eine Bildserie – oder (join) mehrere SER/Videos
  * als eine Serie (PIPP -join).
  */
-async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = false, join = false) {
+async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = false, join = false, mainCamera = false) {
   const dec = makeDecoder(rawMode);
   if (join && files.length > 1 && files.every((f) => VIDEO_EXT.test(f.name))) {
     const parts: { src: FrameSource; name: string }[] = [];
@@ -214,7 +217,7 @@ async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = 
   } else {
     const images = files.filter((f) => /\.(jpe?g|png|tiff?|webp|bmp)$/i.test(f.name) || RAW_EXT.test(f.name) || FITS_EXT.test(f.name));
     if (!images.length) throw new Error(msg("unsupportedFiles"));
-    src = await ImageSequenceSource.open(images.map((f) => ({ file: f, name: f.name, raw: RAW_EXT.test(f.name) })), dec.decode);
+    src = await ImageSequenceSource.open(images.map((f) => ({ file: f, name: f.name, raw: RAW_EXT.test(f.name) })), dec.decode, { mainCamera });
     name = `${src.frameName(0)}-${src.frameName(src.frameCount - 1)}`;
   }
   return { src, name, dec, partNames: null as string[] | null };
@@ -484,7 +487,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
     }
     if (m.type === "open") {
       const seq = ++openSeq;
-      const { src: next, name: nextName, dec, partNames } = await openFiles(m.files, m.rawMode ?? "raw", m.bigEndian, m.join);
+      const { src: next, name: nextName, dec, partNames } = await openFiles(m.files, m.rawMode ?? "raw", m.bigEndian, m.join, m.mainCamera);
       // inzwischen wurde etwas anderes geöffnet: dieses Ergebnis verwerfen
       if (seq !== openSeq) { (next as { dispose?: () => void }).dispose?.(); return; }
       (source as { dispose?: () => void } | null)?.dispose?.();
@@ -508,6 +511,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
           hasTimestamps: !!ts, firstTimestamp: ts ? ticksToIso(ts[0]) : null, lastTimestamp: ts ? ticksToIso(ts[ts.length - 1]) : null, fps,
           wjStart: frameTimes ? frameTimes[0] : null, wjEnd: frameTimes ? frameTimes[frameTimes.length - 1] : null,
           raw: !!dec.state.format && dec.state.format !== "FITS", rawFormat: dec.state.format, rawHint: dec.state.hint,
+          skipped: source instanceof ImageSequenceSource ? source.skipped : undefined,
         },
       });
       return;
@@ -616,6 +620,8 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       const wjSeries = wj ? winjuposName(seriesTime(wj[wjA], wj[wjB], m.options.wjTime) + wjShift, m.options) : null;
       const progress = (phase: "analyse" | "write" | "video", done: number, total: number) => post({ type: "progress", phase, done, total });
       const recorder = m.timelapse.enabled ? new TimelapseRecorder() : null;
+      // zeittreuer Film: Lage von Sonne und Mond je Bild (nur ohne Drehen/Spiegeln/Grösse – sonst nur Überblenden)
+      const metaOf = (r: FrameResult) => (m.timelapse.timing === "real" && !hasTransform(m.options) ? movieMeta(r) : undefined);
       const montage = m.montage?.enabled ? new MontageRecorder() : null;
       if (m.format === "none" && !recorder && !montage) throw new Error(msg("noOutput"));
       const addMontage = (f: Frame, r: FrameResult, ts: bigint | undefined) =>
@@ -634,7 +640,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
           const c = recorder || montage || serColor !== f.colorId ? col(f) : f;
           writer.add(serColor !== f.colorId ? c : f, ts);
           await writer.sink.drain();
-          await recorder?.add(c, ts);
+          await recorder?.add(c, ts, metaOf(r));
           await addMontage(c, r, ts);
         }, progress, () => cancel);
         blob = await writer.finish();
@@ -643,7 +649,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       } else if (m.format === "none") {
         report = await processSource(src, m.options, async (f, r, _k, ts) => {
           const c = col(f);
-          await recorder?.add(c, ts);
+          await recorder?.add(c, ts, metaOf(r));
           await addMontage(c, r, ts);
         }, progress, () => cancel);
         fileName = "";
@@ -655,7 +661,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
           m.options,
           async (raw, r, k, ts) => {
             const f = col(raw);
-            await recorder?.add(f, ts);
+            await recorder?.add(f, ts, metaOf(r));
             await addMontage(f, r, ts);
             const prefix = m.options.qualityEnabled && m.options.reorder ? `${String(k + 1).padStart(digits, "0")}_` : "";
             const iso = ticksToIso(ts);

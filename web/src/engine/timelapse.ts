@@ -25,6 +25,16 @@ export interface TimelapseOptions {
   showTime: boolean;
   /** Zusätzlicher Text, z. B. "Partial solar eclipse 12 Aug 2026" */
   title: string;
+  /**
+   * "frames": jedes Bild gleich lange (fps). "real": zeittreu – die Aufnahmezeit läuft gleichmässig, auch wenn
+   * unregelmässig fotografiert wurde; fehlende Zeit wird mit Zwischenbildern gefüllt (Finsternis: Mond an der
+   * richtigen Stelle), die Totalität läuft langsamer. Braucht Aufnahmezeiten.
+   */
+  timing: "frames" | "real";
+  /** "real": Länge des Films in Sekunden (ohne Halten am Anfang und Ende) */
+  seconds: number;
+  /** Auf die Breite vergrössern, wenn die Bilder kleiner sind (für Handys: Full HD statt kleinem Ausschnitt) */
+  upscale: boolean;
 }
 
 export const defaultTimelapse: TimelapseOptions = {
@@ -36,6 +46,9 @@ export const defaultTimelapse: TimelapseOptions = {
   width: 0,
   showTime: true,
   title: "",
+  timing: "frames",
+  seconds: 24,
+  upscale: false,
 };
 
 /** MP4 für WhatsApp/Google Fotos: höchstens Full HD auf der langen Seite. */
@@ -56,8 +69,8 @@ export function buildSequence(count: number, o: Pick<TimelapseOptions, "fps" | "
 }
 
 /** Ausgabegrösse: Seitenverhältnis bleibt, Videoformate brauchen gerade Kantenlängen. */
-export function outputSize(w: number, h: number, o: Pick<TimelapseOptions, "width" | "format">): [number, number] {
-  let tw = o.width > 0 && o.width < w ? o.width : w;
+export function outputSize(w: number, h: number, o: Pick<TimelapseOptions, "width" | "format"> & { upscale?: boolean }): [number, number] {
+  let tw = o.width > 0 && (o.width < w || o.upscale) ? o.width : w;
   if (isMp4(o.format) && Math.max(tw, (h * tw) / w) > MP4_MAX_LONG_SIDE) {
     tw = w >= h ? MP4_MAX_LONG_SIDE : Math.floor((MP4_MAX_LONG_SIDE * w) / h);
   }

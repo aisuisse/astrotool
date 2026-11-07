@@ -12,6 +12,7 @@ Astrotool prepares videos and image series for stacking software such as AutoSta
 
 - **Planets** – Jupiter, Saturn, Mars & co. stay centred despite seeing and tracking errors; frames sorted by sharpness, best N or best % kept.
 - **Whole observing sessions at once** – open dozens of SER/AVI recordings or a folder of image series, process each with the same settings into one folder, named for **WinJUPOS** derotation – or join recordings into one series.
+- **Eclipse film in one click (Easy mode)** – for travellers without astronomy know-how: drop all photos of the eclipse (camera or phone, any interval, also zoomed differently), Astrotool sorts out shaken, blown-out and non-sun shots, keeps the sun centred at one size and makes a 1080 × 1080 MP4 that runs at an even pace – frames between your photos are calculated, with the moon where it was at that moment (0.34).
 - **Solar eclipses** – a circle is fitted to the solar limb instead of using the brightness centroid, so the sun stays put even on a thin crescent. During **totality** the frames are aligned on the lunar limb, and exposure brackets are merged into one **HDR** image showing inner corona, prominences and outer corona together.
 - **Time-lapses** that are ready to share – MP4 H.265/HEVC or H.264 (plays in WhatsApp and Google Photos and is filed under the capture date), WebM or GIF, with capture time and title burned in.
 - **Every common input** – SER, AVI (SharpCap, FireCapture & co., also > 4 GB), MP4/MOV/MKV/WebM, JPG/PNG/TIFF and camera RAW (sensor data from DNG – also Fujifilm X-Trans – Canon CR2, Sony ARW, Nikon NEF, Samsung SRW and uncompressed Fujifilm RAF; full-size embedded image for CR3, compressed RAF and others, with a hint to convert them to DNG). No extra software needed.
@@ -60,6 +61,7 @@ The app is not code-signed yet, so Windows SmartScreen may show *"Windows protec
 | Write straight to disk while processing (SER to a file, frames to a folder), also when saving a range from the viewer – no memory limit; ZIP64 for archives > 4 GB | – | ✅ |
 | Full-depth frames: 16-bit PNG, 16-bit TIFF and FITS (capture time, exposure, Bayer pattern in the header) for Siril, PixInsight, DeepSkyStacker | TIFF, FITS | ✅ |
 | Eclipse mode: circle fit to the solar limb, plausibility check on the radius | – (new) | ✅ |
+| Easy mode for eclipse series: one button from photos to MP4 (1080 × 1080, H.264). Sorts by capture time, keeps only the camera with most photos, rejects shaken/blurred frames (solar limb wider than in neighbouring frames), blown-out frames and pictures without a sun (landscapes, people); evens out different zoom; crop from the size of the sun; time-true timeline: irregular intervals run evenly, gaps are filled with calculated frames (moon shifted along its path), totality slower; plain-language summary (0.34) | – (new) | ✅ |
 | Totality: alignment on the lunar limb, exposure brackets merged to HDR, sky glow and its gradient removed (0.23); the camera's tone curve is measured from each bracket, so camera JPEGs blend without rings, and false limbs around the contacts (crescent, diamond ring, overexposed inner corona) are rejected (0.33) | – (new) | ✅ |
 | Eclipse phase montage: selected frames as an arc (path of the sun), row or grid, totality in the middle, time under each disc, one large PNG | – (new) | ✅ |
 | Time-lapse: HEVC, H.264, WebM, GIF; frame rate, hold last frame, ping-pong, time and title overlay | `-anim_fwd -anim_rev -anim_fwd_lf_rep= -fps_rate= -gif` | ✅ |
@@ -86,7 +88,7 @@ npm test            # unit tests
 
 Without your own recordings: `npm run sample` creates `sample-jupiter.ser` (a synthetic planet with seeing).
 
-The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 53 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
+The app is tested end to end with a script that drives the finished `.exe` like a person would (`web/scripts/app-fulltest.mjs`, 54 checks across SER, AVI, MP4, RAW, FITS, eclipse, totality and surface stabilisation).
 
 ## How it is built
 

@@ -15,19 +15,23 @@
         <small data-i18n="app.tagline">Pre-processing for planets, Moon, Sun &amp; eclipses</small>
       </div>
       <div class="actions">
-        <label class="btn primary">
+        <div class="seg uiSwitch" role="radiogroup" aria-label="Mode" data-i18n-title="ui.switchTitle" title="Easy: eclipse film in one click · Expert: all settings">
+          <button data-ui="easy" data-i18n="ui.easy">Easy</button>
+          <button data-ui="expert" class="on" data-i18n="ui.expert">Expert</button>
+        </div>
+        <label class="btn primary expertOnly">
           <span data-i18n="btn.open">Open</span>
           <input id="file" type="file" accept=".ser,.avi,.mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden />
         </label>
-        <label class="btn" title="A folder with sub-folders: every sub-folder of images and every video becomes one recording of a batch" data-i18n-title="btn.openFolderTitle">
+        <label class="btn expertOnly" title="A folder with sub-folders: every sub-folder of images and every video becomes one recording of a batch" data-i18n-title="btn.openFolderTitle">
           <span data-i18n="btn.openFolder">Open folder</span>
           <input id="folderIn" type="file" webkitdirectory multiple hidden />
         </label>
-        <div id="recentWrap" class="recentWrap" hidden>
+        <div id="recentWrap" class="recentWrap expertOnly" hidden>
           <button id="recentBtn" class="btn" aria-haspopup="true" aria-expanded="false" data-i18n="recent.btn">Recent ▾</button>
           <div id="recentMenu" class="recentMenu" role="menu" hidden></div>
         </div>
-        <label class="btn">
+        <label class="btn expertOnly">
           <span data-i18n="btn.importPof">Import PIPP options</span>
           <input id="pof" type="file" accept=".pof" hidden />
         </label>
@@ -39,6 +43,33 @@
     </header>
 
     <main>
+      <section id="easy" class="easy" hidden>
+        <h1 data-i18n="easy.title">Solar eclipse film</h1>
+        <p class="lead" data-i18n="easy.lead">Add all your photos of the eclipse. Astrotool finds the sun, sorts out unusable shots, keeps the sun in the middle and turns the series into a film for your phone.</p>
+        <div id="easyDrop" class="drop easyDrop">
+          <div>
+            <strong id="easyDropTitle" data-i18n="easy.dropTitle">Drop your photos or a folder here</strong>
+            <div class="easyPick">
+              <label class="btn primary"><span data-i18n="easy.pickFiles">Choose photos</span><input id="easyFiles" type="file" multiple hidden accept=".jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" /></label>
+              <label class="btn"><span data-i18n="easy.pickFolder">Choose folder</span><input id="easyFolder" type="file" webkitdirectory multiple hidden /></label>
+            </div>
+            <p class="muted" data-i18n="easy.dropHint">JPG or RAW straight from the camera, in any order and at any interval. Your photos stay on your computer.</p>
+          </div>
+        </div>
+        <div id="easyReady" class="easyReady" hidden>
+          <dl id="easyInfo" class="info"></dl>
+          <label class="easyTitle"><span data-i18n="easy.titleLabel">Title in the film (optional)</span><input id="easyTitleIn" type="text" maxlength="80" data-i18n-placeholder="tl.titlePlaceholder" placeholder="e.g. Partial solar eclipse 12 Aug 2026" /></label>
+          <button id="easyRun" class="btn primary big" data-i18n="easy.run">Make film</button>
+          <button id="easyOther" class="btn" data-i18n="easy.other">Choose other photos</button>
+        </div>
+        <div id="easyBusy" class="easyBusy" hidden>
+          <strong id="easyStep"></strong>
+          <div class="progress"><div id="easyBar"></div><span id="easyCount"></span></div>
+          <button id="easyCancel" class="btn" data-i18n="btn.cancel">Cancel</button>
+        </div>
+        <div id="easyResult" class="easyResult" hidden></div>
+        <p id="easyError" class="error" role="alert" hidden></p>
+      </section>
       <section class="stage">
         <div id="drop" class="drop">
           <div>

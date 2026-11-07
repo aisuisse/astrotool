@@ -80,6 +80,8 @@ export class ImageSequenceSource implements FrameSource {
   /** RAW-Rohdaten (Bayer, linear) */
   readonly linear: boolean;
   meta: FrameSource["meta"] = {};
+  /** Nicht verwendete Bilder (nur mit mainCamera): Dateiname und Kamera */
+  skipped: { name: string; camera: string }[] = [];
   get clock(): "utc" | "local" {
     return this.entries.every((e) => e.exif.offsetTimeOriginal) ? "utc" : "local";
   }
@@ -95,13 +97,19 @@ export class ImageSequenceSource implements FrameSource {
     this.bitDepth = first.frame ? first.frame.bitDepth : 8;
     this.linear = !!first.frame;
     const e = entries[0]?.exif;
-    if (e?.model) this.meta.instrument = [e.make, e.model].filter(Boolean).join(" ");
+    // "Canon" + "Canon EOS R7" → "Canon EOS R7"
+    if (e?.model) this.meta.instrument = e.make && !e.model.toLowerCase().startsWith(e.make.toLowerCase().split(" ")[0]) ? `${e.make} ${e.model}` : e.model;
     if (e?.focalLength) this.meta.telescope = `${Math.round(e.focalLength)} mm`;
   }
 
-  static async open(files: { file: Blob; name: string; raw?: boolean }[], decode: ImageDecoder): Promise<ImageSequenceSource> {
+  /**
+   * mainCamera: nur die Bilder der Kamera mit den meisten Bildern (EXIF-Hersteller und -Modell). Für den
+   * Einfach-Modus: Wer einen ganzen Ordner hineinzieht, hat oft auch Handyfotos dabei – andere Kameras haben eine
+   * andere Brennweite und Bildgrösse, die Sonne wäre im Film verschieden gross.
+   */
+  static async open(files: { file: Blob; name: string; raw?: boolean }[], decode: ImageDecoder, opts: { mainCamera?: boolean } = {}): Promise<ImageSequenceSource> {
     if (!files.length) throw new Error(msg("noImages"));
-    const entries: ImageEntry[] = [];
+    let entries: ImageEntry[] = [];
     for (const f of files) {
       // FITS: Zeit, Belichtung und Kamera aus dem FITS-Kopf statt aus EXIF
       // (Kopf des Bildteils – bei komprimierten Dateien steht DATE-OBS in der Erweiterung, nicht im Hauptkopf)
@@ -109,6 +117,17 @@ export class ImageSequenceSource implements FrameSource {
       const fits = isFitsFile ? await fitsImageHeader(f.file) : null;
       const exif = fits ? fitsExif(fits) : await readExifBlob(f.file);
       entries.push({ file: f.file, name: isFitsFile ? fitsBaseName(f.name) : f.name.replace(/\.[^.]+$/, ""), exif, timeMs: exifTimeMs(exif), raw: f.raw });
+    }
+    const skipped: { name: string; camera: string }[] = [];
+    if (opts.mainCamera) {
+      const cam = (e: ImageEntry) => [e.exif.make, e.exif.model].filter(Boolean).join(" ").trim();
+      const counts = new Map<string, number>();
+      for (const e of entries) counts.set(cam(e), (counts.get(cam(e)) ?? 0) + 1);
+      // Bilder ohne Kameraangabe (bearbeitet, Bildschirmfotos) zählen nur, wenn es gar keine Angaben gibt
+      const named = [...counts].filter(([k]) => k);
+      const main = (named.length ? named : [...counts]).sort((a, b) => b[1] - a[1])[0][0];
+      for (const e of entries) if (cam(e) !== main) skipped.push({ name: e.name, camera: cam(e) });
+      entries = entries.filter((e) => cam(e) === main);
     }
     const allTimed = entries.every((e) => e.timeMs !== null);
     entries.sort((a, b) =>
@@ -118,7 +137,9 @@ export class ImageSequenceSource implements FrameSource {
     for (const e of entries) {
       try {
         const first = await decode(e.file, e.raw);
-        return new ImageSequenceSource(entries, first.width, first.height, decode, first);
+        const src = new ImageSequenceSource(entries, first.width, first.height, decode, first);
+        src.skipped = skipped;
+        return src;
       } catch { /* nächstes Bild versuchen */ }
     }
     throw new Error(msg("unsupportedFiles"));
