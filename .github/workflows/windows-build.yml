@@ -54,8 +54,10 @@ jobs:
 
       # Stufe 1 der Signatur (SignPath) kommt hierhin: target\release\astrotool.exe
 
+      # --no-binary-patching: sonst schreibt Tauri die Paketart in die fertige exe und
+      # macht deren Signatur ungültig (nur für den Updater nötig, den Astrotool nicht nutzt)
       - name: Installer packen
-        run: node scripts/tauri.mjs bundle --bundles nsis
+        run: node scripts/tauri.mjs bundle --bundles nsis --no-binary-patching
 
       # Stufe 2 der Signatur (SignPath) kommt hierhin: der Installer
 
