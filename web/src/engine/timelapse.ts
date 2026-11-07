@@ -35,6 +35,11 @@ export interface TimelapseOptions {
   seconds: number;
   /** Auf die Breite vergrössern, wenn die Bilder kleiner sind (für Handys: Full HD statt kleinem Ausschnitt) */
   upscale: boolean;
+  /**
+   * Eingeblendete Uhrzeit verschieben (ms): Handys speichern die Zeitzone mit, die Zeitstempel sind dann UT –
+   * angezeigt wird die Ortszeit der Aufnahme. Setzt der Worker.
+   */
+  clockShiftMs?: number;
 }
 
 export const defaultTimelapse: TimelapseOptions = {
@@ -116,8 +121,14 @@ export function captureDate(t: bigint | undefined, clock: "utc" | "local"): Date
 }
 
 /** 100-ns-Ticks seit 0001-01-01 → "HH:MM:SS". Bei Bildserien ist das die Kamerazeit, bei SER UTC. */
-export function ticksToClock(t: bigint | undefined): string {
+export function ticksToClock(t: bigint | undefined, shiftMs = 0): string {
   if (t === undefined || t <= 0n) return "";
-  const d = new Date(Number((t - 621_355_968_000_000_000n) / 10_000n));
+  const d = new Date(Number((t - 621_355_968_000_000_000n) / 10_000n) + shiftMs);
   return isNaN(d.getTime()) ? "" : d.toISOString().slice(11, 19);
+}
+
+/** Zeitzonen-Versatz aus EXIF ("+02:00", "-05:30") in Millisekunden – 0, wenn keiner angegeben ist */
+export function offsetMs(offset: string | undefined): number {
+  const m = /^([+-])(\d{2}):?(\d{2})$/.exec(offset?.trim() ?? "");
+  return m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) * 60_000 : 0;
 }

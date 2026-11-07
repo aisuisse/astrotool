@@ -82,6 +82,8 @@ export class ImageSequenceSource implements FrameSource {
   meta: FrameSource["meta"] = {};
   /** Nicht verwendete Bilder (nur mit mainCamera): Dateiname und Kamera */
   skipped: { name: string; camera: string }[] = [];
+  /** Kleinere Bilder mit der Hintergrundfarbe des Bildes auffüllen statt schwarz (nur mit mainCamera) */
+  padBackground = false;
   get clock(): "utc" | "local" {
     return this.entries.every((e) => e.exif.offsetTimeOriginal) ? "utc" : "local";
   }
@@ -129,16 +131,25 @@ export class ImageSequenceSource implements FrameSource {
       for (const e of entries) if (cam(e) !== main) skipped.push({ name: e.name, camera: cam(e) });
       entries = entries.filter((e) => cam(e) === main);
     }
+    sameClock(entries);
     const allTimed = entries.every((e) => e.timeMs !== null);
     entries.sort((a, b) =>
       allTimed && a.timeMs !== b.timeMs ? a.timeMs! - b.timeMs! : a.name.localeCompare(b.name, undefined, { numeric: true }),
     );
-    // Bildgrösse vom ersten lesbaren Bild übernehmen
-    for (const e of entries) {
+    // Bildgrösse vom ersten lesbaren Bild übernehmen – mit mainCamera vom grössten (Handys speichern Ausschnitte
+    // nach dem Zoomen kleiner; ein grösseres Bild würde sonst beschnitten)
+    let order = entries;
+    if (opts.mainCamera) {
+      const area = await Promise.all(entries.map(async (e) => { const s = e.raw ? null : await jpegSize(e.file); return s ? s.width * s.height : 0; }));
+      const k = area.indexOf(Math.max(...area));
+      if (k > 0) order = [entries[k], ...entries.filter((_, i) => i !== k)];
+    }
+    for (const e of order) {
       try {
         const first = await decode(e.file, e.raw);
         const src = new ImageSequenceSource(entries, first.width, first.height, decode, first);
         src.skipped = skipped;
+        src.padBackground = !!opts.mainCamera;
         return src;
       } catch { /* nächstes Bild versuchen */ }
     }
@@ -172,6 +183,16 @@ export class ImageSequenceSource implements FrameSource {
     }
     const data = new Uint8Array(w * h * 3);
     const ox = Math.floor((w - img.width) / 2), oy = Math.floor((h - img.height) / 2);
+    if (this.padBackground && (img.width !== w || img.height !== h)) {
+      // Rand in der häufigsten Helligkeit des Bildes (Himmel) – schwarz wäre vor hellem Himmel eine scharfe Kante,
+      // und die Erkennung hielte das ganze Bild für ein helles Objekt
+      const bg = [0, 1, 2].map((c) => {
+        const s: number[] = [];
+        for (let i = c; i < img.rgba!.length; i += 4 * 97) s.push(img.rgba![i]);
+        return s.sort((a, b) => a - b)[s.length >> 1] ?? 0;
+      });
+      for (let i = 0; i < w * h; i++) { data[i * 3] = bg[0]; data[i * 3 + 1] = bg[1]; data[i * 3 + 2] = bg[2]; }
+    }
     for (let y = 0; y < h; y++) {
       const sy = y - oy;
       if (sy < 0 || sy >= img.height) continue;
@@ -363,4 +384,31 @@ export class JoinedSource implements FrameSource {
   dispose() {
     for (const p of this.parts) (p as { dispose?: () => void }).dispose?.();
   }
+}
+
+/**
+ * Zeitzone nur bei einem Teil der Bilder (Handy: bearbeitete Ausschnitte verlieren sie): Diese lägen sonst um die
+ * Zeitzone verschoben auf der Zeitachse – dann gilt für alle die Ortszeit der Kamera.
+ */
+export function sameClock(entries: { exif: ExifInfo; timeMs: number | null }[]): void {
+  const withTz = entries.filter((e) => e.exif.offsetTimeOriginal).length;
+  if (withTz === 0 || withTz === entries.length) return;
+  for (const e of entries) {
+    e.exif = { ...e.exif, offsetTimeOriginal: undefined };
+    e.timeMs = exifTimeMs(e.exif);
+  }
+}
+
+/** Bildgrösse einer JPEG-Datei aus dem Kopf (SOF-Marke), ohne zu dekodieren – oder null */
+export async function jpegSize(file: Blob): Promise<{ width: number; height: number } | null> {
+  const b = new Uint8Array(await file.slice(0, 1 << 18).arrayBuffer());
+  if (b[0] !== 0xff || b[1] !== 0xd8) return null;
+  let p = 2;
+  while (p + 9 < b.length) {
+    if (b[p] !== 0xff) return null;
+    const m = b[p + 1], len = (b[p + 2] << 8) | b[p + 3];
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { height: (b[p + 5] << 8) | b[p + 6], width: (b[p + 7] << 8) | b[p + 8] };
+    p += 2 + len;
+  }
+  return null;
 }

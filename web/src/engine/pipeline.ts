@@ -815,10 +815,14 @@ export async function processSource(
         const [x0, y0] = cropOrigin(cx - o.offsetX / res.zoom, cy - o.offsetY / res.zoom, bw, bh, frame.colorId, bayerPatternFor(o, frame) !== null);
         res.origin = [x0, y0];
         res.zoom = cw / bw;
-        await sink(finishFrame(resize(colourise(cropFrame(frame, x0, y0, bw, bh), o), cw, ch), o), res, written.length, ts);
+        const out = resize(colourise(cropFrame(frame, x0, y0, bw, bh), o), cw, ch);
+        if (o.strictSun) fillOutside(out, x0, y0, res.zoom, src.width, src.height);
+        await sink(finishFrame(out, o), res, written.length, ts);
       } else {
         res.origin = rotates(o) ? undefined : originFor(src, o, res.det);
-        await sink(finishFrame(outputCrop(src, frame, o, res.det, cw, ch), o), res, written.length, ts);
+        const out = outputCrop(src, frame, o, res.det, cw, ch);
+        if (o.strictSun && res.origin) fillOutside(out, res.origin[0], res.origin[1], 1, src.width, src.height);
+        await sink(finishFrame(out, o), res, written.length, ts);
       }
       written.push(res.index);
     }
@@ -827,6 +831,23 @@ export async function processSource(
 
   const [ow, oh] = outputSize(src, o);
   return { frames: results, written, hdrGroups, outWidth: ow, outHeight: oh };
+}
+
+/**
+ * Einfach-Modus: Liegt die Sonne am Bildrand, reicht der Ausschnitt über das Foto hinaus. Statt schwarz wird dieser
+ * Teil in der häufigsten Farbe des Ausschnitts gefüllt (Himmel). x0/y0: Ausschnitt im Foto, zoom: Ausgabe je Fotopixel.
+ */
+export function fillOutside(f: Frame, x0: number, y0: number, zoom: number, srcW: number, srcH: number): void {
+  const p = f.planes, W = f.width, H = f.height;
+  const inside = (x: number, y: number) => { const sx = x0 + (x + 0.5) / zoom, sy = y0 + (y + 0.5) / zoom; return sx >= 0 && sy >= 0 && sx < srcW && sy < srcH; };
+  if (inside(0, 0) && inside(W - 1, 0) && inside(0, H - 1) && inside(W - 1, H - 1)) return;
+  const bg = Array.from({ length: p }, (_, c) => {
+    const s: number[] = [];
+    for (let y = 0; y < H; y += 5) for (let x = 0; x < W; x += 5) if (inside(x, y)) s.push(f.data[(y * W + x) * p + c]);
+    return s.sort((a, b) => a - b)[s.length >> 1] ?? 0;
+  });
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) if (!inside(x, y)) for (let c = 0; c < p; c++) f.data[(y * W + x) * p + c] = bg[c];
 }
 
 /** Bequeme Variante für SER → SER (wird von Tests genutzt). */

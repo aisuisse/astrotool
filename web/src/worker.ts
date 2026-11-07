@@ -14,7 +14,7 @@ import { ZipWriter } from "./engine/zip";
 import { calibratedSource, decodeMaster, encodeMaster, masterStats, MasterBuilder, type Calibration, type Master } from "./engine/calibrate";
 import { FileSink, MemorySink, type ByteSink, type WritableFile } from "./engine/sink";
 import { encodeFits, encodePng16, encodeTiff16, type ImageMeta } from "./engine/imagewrite";
-import { captureDate, type TimelapseOptions } from "./engine/timelapse";
+import { captureDate, offsetMs, type TimelapseOptions } from "./engine/timelapse";
 import { seriesTime, shiftMs, timeFromName, winjuposName } from "./engine/winjupos";
 import { TimelapseRecorder, type NativeHevc } from "./timelapse-encode";
 import { MontageRecorder } from "./montage-render";
@@ -695,7 +695,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       if (recorder && recorder.count) {
         try {
           const recorded = captureDate(recorder.firstStamp(), src.clock);
-          timelapse = await recorder.render(m.timelapse, baseName, (d, t) => progress("video", d, t), recorded, m.nativeHevc ? nativeHevc : undefined);
+          timelapse = await recorder.render({ ...m.timelapse, clockShiftMs: clockShift(src) }, baseName, (d, t) => progress("video", d, t), recorded, m.nativeHevc ? nativeHevc : undefined);
         } catch (e) {
           timelapseError = e instanceof Error ? e.message : String(e);
         }
@@ -703,7 +703,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       let montageResult = null, montageError: string | null = null;
       if (montage && montage.count) {
         try {
-          montageResult = await montage.render({ ...m.montage!, title: m.montage!.title || m.timelapse.title }, baseName);
+          montageResult = await montage.render({ ...m.montage!, title: m.montage!.title || m.timelapse.title }, baseName, clockShift(src));
         } catch (e) {
           montageError = e instanceof Error ? e.message : String(e);
         }
@@ -743,3 +743,8 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
     post({ type: "error", message: e instanceof Error ? e.message : String(e) });
   }
 };
+
+/** Bildserie mit Zeitzone in EXIF (Handys): Zeitstempel sind UT – eingeblendet wird die Ortszeit der Aufnahme */
+function clockShift(src: FrameSource): number {
+  return src instanceof ImageSequenceSource && src.clock === "utc" ? offsetMs(src.entries[0]?.exif.offsetTimeOriginal) : 0;
+}

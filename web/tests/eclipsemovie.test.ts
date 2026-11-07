@@ -187,3 +187,17 @@ describe("Ist das die Sonne? (Einfach-Modus)", () => {
     expect(d.disc!.r).toBeLessThan(23);
   });
 });
+
+describe("Bildserie mit und ohne Zeitzone", () => {
+  it("fehlt die Zeitzone bei einem Teil der Fotos, gilt für alle die Ortszeit der Kamera", async () => {
+    const { sameClock } = await import("../src/engine/source");
+    const { exifTimeMs } = await import("../src/engine/exif");
+    // Aufnahme 19:45 mit Zeitzone +02:00, 20:15 ohne (bearbeiteter Ausschnitt): 30 min auseinander, nicht 2.5 h
+    const ex = [{ dateTimeOriginal: "2026:08:12 19:45:00", offsetTimeOriginal: "+02:00" }, { dateTimeOriginal: "2026:08:12 20:15:00" }];
+    const entries = ex.map((e) => ({ exif: e, timeMs: exifTimeMs(e) }));
+    expect((entries[1].timeMs! - entries[0].timeMs!) / 1000).toBe(9000);
+    sameClock(entries);
+    expect((entries[1].timeMs! - entries[0].timeMs!) / 1000).toBe(1800);
+    expect(entries[0].exif.offsetTimeOriginal).toBeUndefined();
+  });
+});

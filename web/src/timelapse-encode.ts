@@ -203,7 +203,7 @@ export class TimelapseRecorder {
       }
       // Zwischenbilder: Uhrzeit zu ihrer Zeit (läuft gleichmässig weiter)
       const stamp = real ? stamps[0] + BigInt(Math.round(s.t * 1e7)) : this.frames[idx].stamp;
-      const clock = o.showTime ? ticksToClock(stamp) : "";
+      const clock = o.showTime ? ticksToClock(stamp, o.clockShiftMs) : "";
       if (clock) text(clock, pad, H - pad);
     };
 

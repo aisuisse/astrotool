@@ -45,7 +45,8 @@ export class MontageRecorder {
     return this.items.length;
   }
 
-  async render(o: MontageOptions, baseName: string): Promise<MontageResult> {
+  /** clockShiftMs: Uhrzeit verschieben (Handy-Zeitstempel in UT → Ortszeit der Aufnahme) */
+  async render(o: MontageOptions, baseName: string, clockShiftMs = 0): Promise<MontageResult> {
     const pick = selectMontage(this.items, o.count);
     // Anteil der Sonnenscheibe am Ausschnitt (Median der partiellen Phasen), sonst 90 %
     const sorted = [...this.discs].sort((a, b) => a - b);
@@ -72,7 +73,7 @@ export class MontageRecorder {
       g.font = `500 ${plan.font}px system-ui, "Segoe UI", sans-serif`;
       g.textAlign = "center";
       for (let k = 0; k < pick.length; k++) {
-        const clock = ticksToClock(this.items[pick[k]].stamp);
+        const clock = ticksToClock(this.items[pick[k]].stamp, clockShiftMs);
         if (!clock) continue;
         const t = plan.tiles[k];
         g.fillText(clock.slice(0, 5), t.x, t.y + plan.disc / 2 + plan.font * 1.6);
