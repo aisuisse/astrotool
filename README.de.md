@@ -25,7 +25,7 @@ Hintergrund und Plan: [docs/reverse-engineering](docs/reverse-engineering/).
 
 ## Windows-App (.exe)
 
-Schwerpunkt der Entwicklung. Installer (~2 MB) bzw. portable .exe (~9 MB), Windows 10/11, keine weiteren Programme nötig. Noch nicht signiert: Beim ersten Start kann SmartScreen „Der Computer wurde durch Windows geschützt“ melden – „Weitere Informationen“ → „Trotzdem ausführen“; Astrotool nur von der Release-Seite dieses Repos herunterladen. Bauen und Details: [docs/windows-app.md](docs/windows-app.md).
+Schwerpunkt der Entwicklung. Installer (~2 MB) bzw. portable .exe (~9 MB), Windows 10/11, keine weiteren Programme nötig. Noch nicht signiert: Beim ersten Start kann SmartScreen „Der Computer wurde durch Windows geschützt“ melden – „Weitere Informationen“ → „Trotzdem ausführen“; Astrotool nur von der Release-Seite dieses Repos herunterladen. Künftige Versionen werden über die SignPath Foundation signiert – siehe [Code-Signatur](#code-signatur-code-signing-policy). Bauen und Details: [docs/windows-app.md](docs/windows-app.md).
 
 ## Web-Version starten
 
@@ -91,6 +91,17 @@ Die Analyse von PIPP läuft mit [rea](https://github.com/morluto/rea) (MCP-Serve
 3. Belege neu erzeugen: `bash re/scripts/extract-evidence.sh` → `re/evidence/` (nicht im Git).
 
 Für die Analyse der nativen Engine (`pipp_core.exe`) braucht rea zusätzlich Ghidra + JDK 21.
+
+## Code-Signatur (Code signing policy)
+
+Kostenlose Code-Signatur von [SignPath.io](https://about.signpath.io), Zertifikat der [SignPath Foundation](https://signpath.org).
+
+- Committer und Reviewer: [aisuisse](https://github.com/aisuisse)
+- Freigabe (Approver): [aisuisse](https://github.com/aisuisse)
+
+Die Windows-Dateien werden von GitHub Actions aus diesem Repository gebaut ([windows-build.yml](.github/workflows/windows-build.yml)). Jede Version wird vor der Signatur von Hand freigegeben. Stand: beantragt – Versionen bis 0.34 sind noch nicht signiert.
+
+**Datenschutz:** Dieses Programm überträgt keine Informationen an andere Systeme im Netz, ausser die Benutzerin oder der Benutzer verlangt es ausdrücklich. Astrotool arbeitet offline mit den eigenen Dateien. Der Installer lädt Microsoft WebView2 nur, wenn es auf dem Computer fehlt; Hilfsprogramme wie FFmpeg werden nur per Klick auf *Installieren* unter *Tools & Setup* über winget installiert.
 
 ## Lizenz
 
