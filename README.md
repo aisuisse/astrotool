@@ -37,7 +37,7 @@ On a real series of 77 photos of the partial solar eclipse of 12 August 2026, PI
 
 Astrotool is a native Windows app (Tauri 2, about 9 MB). The installer works per user without administrator rights; a portable `.exe` is available as well. Nothing else has to be installed – FFmpeg is optional and only used for H.265 encoding (one click in *Tools & Setup*).
 
-The app is not code-signed yet, so Windows SmartScreen may show *"Windows protected your PC"* on first start. Click **More info** → **Run anyway**. Download Astrotool only from this repository's releases page. Future releases will be signed via the SignPath Foundation – see [Code signing policy](#code-signing-policy).
+The app is not code-signed yet, so Windows SmartScreen may show *"Windows protected your PC"* on first start. Click **More info** → **Run anyway**. Download Astrotool only from this repository's releases page.
 
 ## Feature overview
 
@@ -103,16 +103,9 @@ The app is tested end to end with a script that drives the finished `.exe` like 
 
 PIPP is freeware by Chris Garry; its source code was never published. Astrotool contains **no code and no binaries** from PIPP or SER Player. PIPP was studied only to understand its feature set, options and file formats (for example to import `.pof` files); all algorithms are implemented independently from public specifications (SER format, TIFF/DNG, RIFF/AVI, ITU-T T.81) and the literature. Notes: [docs/reverse-engineering](docs/reverse-engineering/).
 
-## Code signing policy
+## Privacy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
-
-- Committers and reviewers: [aisuisse](https://github.com/aisuisse)
-- Approvers: [aisuisse](https://github.com/aisuisse)
-
-The Windows files are built from this repository by GitHub Actions ([windows-build.yml](.github/workflows/windows-build.yml)). Every release is approved by hand before it is signed. Status: application submitted – releases up to 0.34 are not signed yet.
-
-**Privacy policy:** this program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Astrotool works offline on your own files. The installer downloads Microsoft WebView2 only if it is missing on the computer; helper tools such as FFmpeg are installed via winget only when you click *Install* in *Tools & Setup*.
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Astrotool works offline on your own files. The installer downloads Microsoft WebView2 only if it is missing on the computer; helper tools such as FFmpeg are installed via winget only when you click *Install* in *Tools & Setup*.
 
 ## Contributing
 
