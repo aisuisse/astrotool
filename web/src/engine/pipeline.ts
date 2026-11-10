@@ -316,22 +316,30 @@ export function detect(lum: Lum, o: ProcessOptions, whole?: WholeView): FrameDet
     const lunar = o.subject === "moon";
     // Ausschnitt: Hintergrund und Helligkeit der Scheibe vom ganzen Bild – dieselben Schwellen wie ohne Ausschnitt
     const levels = whole ? { background: backgroundLevel(whole.lum), peak: percentile(whole.lum.data, 0.999) } : undefined;
-    let [fit, kind] = lunar ? ([fitSunDisc(lum, { threshold: o.threshold ?? undefined, levels }), "sun"] as [DiscFit, "sun" | "moon"]) : limbFit(lum, o, levels);
+    // … und dasselbe Raster der Grobsuche (der Ausschnitt beginnt auf einem Vielfachen davon, siehe detectFast)
+    const fSun = whole ? coarseFactor(whole, 1200) : undefined, fMoon = whole ? coarseFactor(whole, 900) : undefined;
+    let [fit, kind] = lunar ? ([fitSunDisc(lum, { threshold: o.threshold ?? undefined, levels, factor: fSun }), "sun"] as [DiscFit, "sun" | "moon"]) : limbFit(lum, o, levels, fSun, fMoon);
+    // Einfach-Modus: Lichtschein ohne brauchbaren Kreis, aber mit gesättigtem Kern (Handy ohne Filter) – ob die erste
+    // Suche am Schein gelingt, ist Glückssache; gemessen wird ohnehin am Kern (siehe unten). Dann gleich dort.
+    if (!lunar && o.strictSun && !fit.found && det.maxValue >= 0.98) {
+      const core = fitSunDisc(lum, { threshold: 0.9, factor: fSun });
+      if (core.found && core.visibleLimb >= 0.3 && core.rms <= Math.max(2, 0.03 * core.r)) [fit, kind] = [core, "sun"];
+    }
     // Einfach-Modus: überstrahlte Sonne im grossen Lichtschein (Handy ohne Filter, herangezoomt) – die Schwelle bei
     // halber Höhe liegt dann im Lichtschein, der „Rand“ wäre der Rand des Scheins. Gemessen wird am gesättigten Kern.
     if (!lunar && o.strictSun && fit.found && kind === "sun" && det.maxValue >= 0.98 && saturatedShare(lum, fit) < 0.3) {
-      const core = fitSunDisc(lum, { threshold: 0.9 });
+      const core = fitSunDisc(lum, { threshold: 0.9, factor: fSun });
       if (core.found && core.r < 0.7 * fit.r) fit = core;
     }
     if (fit.found) {
       det.disc = { cx: fit.cx, cy: fit.cy, r: fit.r, visibleLimb: fit.visibleLimb, rms: fit.rms, kind };
       det.size = Math.round(2 * fit.r);
       if (kind === "sun" && o.totalitySunCentre && !lunar) {
-        const m = fitMoonInPartial(lum, fit, fit.threshold);
+        const m = fitMoonInPartial(lum, fit, fit.threshold, { factor: fMoon });
         if (m) det.disc.moon = { cx: m.cx, cy: m.cy, r: m.r };
       }
       if (kind === "sun" && !det.disc.moon && !lunar) {
-        const m = fitMoonInPartial(lum, fit, fit.threshold, { maxRms: Math.max(4, 0.025 * fit.r) });
+        const m = fitMoonInPartial(lum, fit, fit.threshold, { maxRms: Math.max(4, 0.025 * fit.r), factor: fMoon });
         if (m) det.disc.moonLoose = { cx: m.cx, cy: m.cy, r: m.r };
       }
       if (kind === "sun") det.disc.limbWidth = limbWidth(lum, fit, det.disc.moon) ?? undefined;
@@ -357,6 +365,9 @@ export function detect(lum: Lum, o: ProcessOptions, whole?: WholeView): FrameDet
   return det;
 }
 
+/** Verkleinerungsfaktor der Grobsuche am ganzen Bild (wie in fitSunDisc bzw. fitMoonDisc) */
+const coarseFactor = (size: { width: number; height: number }, workSize: number) => Math.max(1, Math.ceil(Math.max(size.width, size.height) / workSize));
+
 /** Längere Seite der verkleinerten Ansicht für die Grobsuche */
 const PREVIEW_SIDE = 800;
 
@@ -372,7 +383,10 @@ async function detectFast(src: FrameSource, index: number, o: ProcessOptions): P
   if (!coarse.found) return coarse;
   const bw = (coarse.x1 - coarse.x0 + 1) * scale, bh = (coarse.y1 - coarse.y0 + 1) * scale;
   const m = Math.max(0.6 * Math.max(bw, bh), 4 * scale, 48);
-  const x0 = Math.max(0, Math.floor(coarse.x0 * scale - m)), y0 = Math.max(0, Math.floor(coarse.y0 * scale - m));
+  // Ecke auf dem Raster der Grobsuche am ganzen Bild – die verkleinerten Bildpunkte sind dann dieselben
+  const grid = coarseFactor(src, 1200) * coarseFactor(src, 900);
+  const snap = (v: number) => v - (v % grid);
+  const x0 = snap(Math.max(0, Math.floor(coarse.x0 * scale - m))), y0 = snap(Math.max(0, Math.floor(coarse.y0 * scale - m)));
   const x1 = Math.min(src.width, Math.ceil((coarse.x1 + 1) * scale + m)), y1 = Math.min(src.height, Math.ceil((coarse.y1 + 1) * scale + m));
   const lum = lumFor(src, await src.readRegion!(index, x0, y0, x1 - x0, y1 - y0), o);
   const det = detect(lum, o, { lum: lumS, scale, x: x0, y: y0, width: src.width, height: src.height, objectThreshold: coarse.threshold });
@@ -419,9 +433,9 @@ export function brightOutside(l: Lum, d: { cx: number; cy: number; r: number; th
  * Sonnenrand oder – in der Totalität – Mondrand. Ein Mond ringsum in Korona gilt als Totalität,
  * ausser die ganze Sonnenscheibe umschliesst ihn sichtbar (ringförmige Finsternis → Sonnenrand).
  */
-function limbFit(lum: Lum, o: ProcessOptions, levels?: { background: number; peak: number }): [DiscFit, "sun" | "moon"] {
-  const moon = fitMoonDisc(lum);
-  const sun = fitSunDisc(lum, { threshold: o.threshold ?? undefined, levels });
+function limbFit(lum: Lum, o: ProcessOptions, levels?: { background: number; peak: number }, fSun?: number, fMoon?: number): [DiscFit, "sun" | "moon"] {
+  const moon = fitMoonDisc(lum, { factor: fMoon });
+  const sun = fitSunDisc(lum, { threshold: o.threshold ?? undefined, levels, factor: fSun });
   if (!moon.found) return [sun, "sun"];
   const annular =
     sun.found && sun.visibleLimb >= 0.8 && sun.r > moon.r * 1.01 &&

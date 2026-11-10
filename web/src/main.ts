@@ -1327,8 +1327,16 @@ function renderEasyDone(m: Extract<FromWorker, { type: "done" }>) {
   $("easyAgain")?.addEventListener("click", () => resetEasy());
 }
 
+document.body.classList.toggle("app", isDesktopApp());
+// Ordner wählen: nicht auf Geräten, die das nicht können (iPhone/iPad)
+if (!("webkitdirectory" in HTMLInputElement.prototype)) $("easyFolder").closest("label")?.setAttribute("hidden", "");
 try { if (localStorage.getItem("astrotool-easy-kind") === "lunar") setEasyKind("lunar"); } catch { /* egal */ }
-try { if (localStorage.getItem("astrotool-ui") === "easy") setUi(true); } catch { /* egal */ }
+try {
+  // Im Browser beginnt der erste Besuch im Einfach-Modus (die Webseite ist für Einsteiger); die Desktop-App
+  // bleibt beim Profi-Modus, bis man umschaltet.
+  const ui = localStorage.getItem("astrotool-ui");
+  if (ui === "easy" || (ui === null && !isDesktopApp())) setUi(true);
+} catch { /* egal */ }
 try {
   const s = localStorage.getItem("astrotool-easy-shape");
   if (s === "portrait" || s === "landscape") $<HTMLSelectElement>("easyShape").value = s;

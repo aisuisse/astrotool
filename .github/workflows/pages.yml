@@ -1,0 +1,56 @@
+# Web-Version: baut die App für den Browser und veröffentlicht sie über GitHub Pages
+# (https://astrotool.ai-suisse.com). Läuft bei jeder veröffentlichten Version (Tag v*) oder von Hand –
+# die Webseite zeigt damit immer den Stand der letzten Version, nicht jeden Zwischenstand.
+name: Website
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Abhängigkeiten
+        run: npm ci
+
+      - name: Einheitstests
+        run: npm test
+
+      - name: Web-App bauen
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

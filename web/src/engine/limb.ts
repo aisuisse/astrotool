@@ -38,6 +38,8 @@ export interface DiscOptions {
    * Ausschnitt ist (schnelle Analyse): Die Schwellen sollen dieselben sein wie am ganzen Bild.
    */
   levels?: { background: number; peak: number };
+  /** Verkleinerungsfaktor der Grobsuche vorgeben (statt aus workSize) – für Ausschnitte: derselbe wie am ganzen Bild */
+  factor?: number;
 }
 
 const notFound = (thr: number): DiscFit => ({ found: false, cx: 0, cy: 0, r: 0, visibleLimb: 0, rms: 0, threshold: thr, x0: 0, y0: 0, x1: 0, y1: 0 });
@@ -141,7 +143,7 @@ export function sample(l: Lum, x: number, y: number): number {
 
 export function fitSunDisc(l: Lum, opts: DiscOptions = {}): DiscFit {
   const rand = opts.random ?? seeded(12345);
-  const f = Math.max(1, Math.ceil(Math.max(l.width, l.height) / (opts.workSize ?? 1200)));
+  const f = opts.factor ?? Math.max(1, Math.ceil(Math.max(l.width, l.height) / (opts.workSize ?? 1200)));
   const s = downsample(l, f);
   const lv = opts.levels;
   const thr = opts.threshold ?? (lv ? lv.background + (lv.peak - lv.background) / 2 : halfMaxThreshold(s));

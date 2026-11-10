@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 const args = process.argv.slice(2);
 const exe = args[0], outDir = args[1] && resolve(args[1]);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
-const smallSer = opt("--ser"), imageDir = opt("--images"), bigSer = opt("--big"), totalityDir = opt("--totality"), aviDir = opt("--avi"), rawDir = opt("--raw"), calDir = opt("--cal"), fitsDir = opt("--fits"), fitsCube = opt("--fitscube"), surfaceSer = opt("--surface"), fzDir = opt("--fz"), batchDir = opt("--batch"), imgBatchDir = opt("--imgbatch");
+const smallSer = opt("--ser"), imageDir = opt("--images"), bigSer = opt("--big"), totalityDir = opt("--totality"), aviDir = opt("--avi"), rawDir = opt("--raw"), calDir = opt("--cal"), fitsDir = opt("--fits"), fitsCube = opt("--fitscube"), surfaceSer = opt("--surface"), fzDir = opt("--fz"), batchDir = opt("--batch"), imgBatchDir = opt("--imgbatch"), heicDir = opt("--heic"), lunarDir = opt("--lunar");
 if (!exe || !outDir || !smallSer || !imageDir) {
   console.error("Aufruf: node scripts/app-fulltest.mjs <astrotool.exe> <ausgabeordner> --ser <klein.ser> --images <bilderordner> [--big <gross.ser>]");
   process.exit(2);
@@ -766,6 +766,72 @@ try {
       try { await (await navigator.storage.getDirectory()).removeEntry('ordner-test', { recursive: true }); } catch {}
       return true; })()`);
     return { list: row.list, saved, text: r.text.slice(0, 300) };
+  });
+
+  // ---------- HEIC (iPhone): Aufbau selbst gelesen, dekodiert mit dem HEVC-Dekoder des Systems ----------
+  if (heicDir) await test("HEIC (iPhone-Fotos): öffnen, Kamera und Aufnahmezeit, Hochformat gedreht", async () => {
+    const files = readdirSync(heicDir).filter((f) => /^(IMG_|iphone).*\.hei[cf]$/i.test(f)).sort().map((f) => resolve(join(heicDir, f)));
+    check(files.length >= 2, `iPhone-Beispiele fehlen in ${heicDir}`);
+    const supported = await ev(`VideoDecoder.isConfigSupported({ codec: 'hvc1.3.E.L90.B0' }).then((r) => !!r.supported, () => false)`);
+    check(supported, "dieser Rechner hat keinen HEVC-Dekoder (WebCodecs)");
+    // einzeln öffnen: jedes Foto in seiner eigenen Grösse
+    const out = [];
+    for (const f of files) {
+      const name = f.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "");
+      await openFiles([f], name);
+      const i = await ev(`document.getElementById('info').innerText.replace(/\\n/g, ' | ')`);
+      check(/iPhone/.test(i), `Kamera fehlt: ${i}`);
+      check(/20\d\d-\d\d-\d\d \d\d:\d\d/.test(i), `Aufnahmezeit fehlt: ${i}`);
+      out.push(i.slice(0, 200));
+    }
+    // iPhone 13 Pro Max: 4032 × 3024 gespeichert, im Hochformat aufgenommen → 3024 × 4032
+    check(out.some((i) => /3[  ’']?024\s*[×x]\s*4[  ’']?032/.test(i)), `Hochformat nicht gedreht: ${out.join(" || ")}`);
+    // Bild wirklich dekodiert: Vorschau nicht schwarz
+    await processMode();
+    await sleep(1500);
+    const mean = await ev(`(() => { const c = document.getElementById('inCanvas'); if (!c || !c.width) return -1; const g = c.getContext('2d'); const d = g.getImageData(0, 0, c.width, c.height).data; let s = 0; for (let i = 0; i < d.length; i += 4 * 97) s += d[i] + d[i + 1] + d[i + 2]; return s / (d.length / (4 * 97)) / 3; })()`);
+    check(mean > 10, `Vorschau schwarz (Mittel ${mean})`);
+    return { files: files.length, info: out, previewMean: Math.round(mean) };
+  });
+
+  // ---------- Einfach-Modus: Mondfinsternis mit dem Handy (verschiedener Zoom, Landschaften dazwischen) ----------
+  if (lunarDir) await test("Einfach-Modus: Mondfinsternis (Handy-Fotos) → Film, Landschaften aussortiert", async () => {
+    const files = readdirSync(lunarDir).filter((f) => /\.jpe?g$/i.test(f)).sort().map((f) => resolve(join(lunarDir, f)));
+    await ev(`document.querySelector('[data-ui="easy"]').click(); document.querySelector('#easyKind [data-kind="lunar"]').click(); true`);
+    await sleep(500);
+    const head = await ev(`document.getElementById('easyH1').innerText`);
+    check(/(Lunar|Mond)/.test(head), `Überschrift: ${head}`);
+    await setFiles("#easyFiles", files);
+    await waitFor(`!document.getElementById('easyReady').hidden && /${files.length}/.test(document.getElementById('easyInfo').innerText)`, 120_000, "Fotos lesen");
+    const info = await ev(`document.getElementById('easyInfo').innerText.replace(/\\n/g, ' | ')`);
+    await ev(`document.getElementById('easyShape').value = 'portrait'; document.getElementById('easyRun').click(); true`);
+    const t0 = Date.now();
+    for (;;) {
+      const st = await ev(`({ done: !document.getElementById('easyResult').hidden, err: document.getElementById('easyError').innerText })`);
+      if (st.err) throw new Error("App meldet: " + st.err);
+      if (st.done) break;
+      if (Date.now() - t0 > 900_000) throw new Error("Zeitüberschreitung beim Film");
+      await sleep(1000);
+    }
+    const text = await ev(`document.getElementById('easyResult').innerText`);
+    const b64 = await ev(`__t.base64('#easyResult a[download]', '\\\\.mp4$')`);
+    const p = join(outDir, "einfach_mondfinsternis.mp4");
+    writeFileSync(p, Buffer.from(b64, "base64"));
+    let probe = null;
+    try { probe = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name,width,height,avg_frame_rate,nb_frames:format=duration", "-of", "json", p]).toString()); } catch { /* ffprobe fehlt */ }
+    const s = probe?.streams?.[0], dur = Number(probe?.format?.duration);
+    // Hochformat 9:16
+    check(!probe || (s.width === 1080 && s.height === 1920 && s.codec_name === "h264" && dur > 10 && dur < 35), `Film: ${JSON.stringify(probe)}`);
+    const m = /(\d+) (?:of|von) (\d+) (?:photos|Fotos)/.exec(text);
+    check(m && Number(m[2]) === files.length, `Ergebnis: ${text.slice(0, 300)}`);
+    // echte Serie: 14 Mondfotos, 14 Landschaften mit winzigem Mond
+    check(Number(m[1]) >= 12 && Number(m[1]) <= 16, `verwendet ${m[1]} von ${m[2]} (erwartet 14)`);
+    check(/(moon|Mond)/.test(text) && !/(sun\b|Sonne)/.test(text), `Text nennt nicht den Mond: ${text.slice(0, 400)}`);
+    // zurück: Sonnenfinsternis und Profi-Modus (für die folgenden Tests und den nächsten Start)
+    await ev(`document.getElementById('easyAgain')?.click(); document.getElementById('easyShape').value = 'source'; document.querySelector('#easyKind [data-kind="solar"]').click(); document.querySelector('[data-ui="expert"]').click(); true`);
+    await sleep(500);
+    try { await ev(`localStorage.setItem('astrotool-easy-shape', 'source'); true`); } catch { /* egal */ }
+    return { files: files.length, info, used: Number(m[1]), seconds: (Date.now() - t0) / 1000, text: text.slice(0, 300), probe };
   });
 
   // ---------- Einfach-Modus: Fotos hinein, Film heraus (jedes zweite Bild – noch unregelmässigere Abstände) ----------

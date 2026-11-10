@@ -18,6 +18,8 @@ export interface MoonOptions {
   workSize?: number;
   /** Mindestanteil des Mondrands mit Korona-Kante, damit das Bild als Totalität gilt */
   minVisible?: number;
+  /** Verkleinerungsfaktor der Grobsuche vorgeben (statt aus workSize) – für Ausschnitte: derselbe wie am ganzen Bild */
+  factor?: number;
 }
 
 interface Hole {
@@ -145,8 +147,8 @@ function refineDarkLimb(l: Lum, cx: number, cy: number, r: number, dark: number,
  * Liefert die Mondmitte oder null (zu wenig Mondrand vor der Sonne, z. B. ganz am Anfang der Finsternis).
  * Zusammen mit der Sonnenmitte desselben Bildes ergibt das den Abstand Sonne–Mond, unabhängig vom Nachführfehler.
  */
-export function fitMoonInPartial(l: Lum, sun: { cx: number; cy: number; r: number }, thr: number, opts: { workSize?: number; maxRms?: number } = {}): { cx: number; cy: number; r: number; rms: number; arc: number } | null {
-  const f = Math.max(1, Math.ceil(Math.max(l.width, l.height) / (opts.workSize ?? 900)));
+export function fitMoonInPartial(l: Lum, sun: { cx: number; cy: number; r: number }, thr: number, opts: { workSize?: number; maxRms?: number; factor?: number } = {}): { cx: number; cy: number; r: number; rms: number; arc: number } | null {
+  const f = opts.factor ?? Math.max(1, Math.ceil(Math.max(l.width, l.height) / (opts.workSize ?? 900)));
   const s = downsample(l, f);
   const { width: w, height: h, data } = s;
   const scx = (sun.cx + 0.5) / f, scy = (sun.cy + 0.5) / f, sr = sun.r / f;
@@ -172,7 +174,7 @@ export function fitMoonInPartial(l: Lum, sun: { cx: number; cy: number; r: numbe
 
 /** Mondscheibe in der Totalität (dunkle Scheibe in heller Korona). */
 export function fitMoonDisc(l: Lum, opts: MoonOptions = {}): DiscFit {
-  const f = Math.max(1, Math.ceil(Math.max(l.width, l.height) / (opts.workSize ?? 900)));
+  const f = opts.factor ?? Math.max(1, Math.ceil(Math.max(l.width, l.height) / (opts.workSize ?? 900)));
   const s = downsample(l, f);
   const bg = percentile(s.data, 0.05);
   // Sehr hoch ansetzen: Bei Perlschnur und Chromosphäre ist nur ein dünner Ring hell (< 0.1 % der Fläche).

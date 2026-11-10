@@ -11,12 +11,13 @@ Einsatzgebiete:
 - **Planeten** – Jupiter, Saturn, Mars & Co. trotz Seeing und Nachführfehlern stabil in der Bildmitte.
 - **Mond und Sonne** – Vollscheibe zentrieren, Oberflächen-Ausschnitte stabilisieren (0.22).
 - **Finsternis-Film mit einem Klick (Einfach-Modus)** – für Reisende ohne Astronomie-Kenntnisse: alle Fotos der Finsternis hineinziehen (Kamera oder Handy, beliebige Abstände, auch verschieden gezoomt); Astrotool sortiert verwackelte, überstrahlte und Bilder ohne Sonne aus, hält die Sonne gleich gross in der Mitte und macht daraus ein MP4 (1080 × 1080), das gleichmässig läuft – Bilder zwischen den Fotos werden berechnet, der Mond steht dort, wo er zu dieser Zeit war (0.34).
+- **Mondfinsternisse, Handyfotos und weitere Formate (0.35)** – der Einfach-Modus macht auch aus einer **Mondfinsternis** einen Film: Der Mond bleibt über alle Zoomstufen gleich gross in der Mitte, Landschaften mit winzigem Mond werden aussortiert. **iPhone-Fotos (HEIC)** werden direkt gelesen (Hochformat steht aufrecht); der Film ist wahlweise quadratisch, 9:16 (Status, Reels) oder 16:9. Grosse Fotos werden rund 2.5-mal schneller ausgewertet, und Lücken von 20 Minuten und mehr werden ohne Störungen überbrückt.
 - **Sonnenfinsternisse** – Bildserien über alle Phasen ausrichten und die Sonnenscheibe auch bei schmaler Sichel sauber zentrieren (Kreis am Sonnenrand statt Helligkeits-Schwerpunkt); Aufnahmezeiten bleiben erhalten. Daraus direkt einen Zeitraffer mit eingeblendeter Uhrzeit erstellen; Phasenmontagen folgen.
 - **WinJUPOS** – Dateinamen mit der Aufnahmezeit in UT, direkt für die Derotation (0.29).
 - **Ganze Beobachtungsabende** – viele SER/AVI-Aufnahmen oder ein Ordner mit Bildserien auf einmal, jede mit denselben Einstellungen in einen Ordner, mit WinJUPOS-Namen – oder Aufnahmen zu einer Serie zusammengefügt (0.31, Bildserien 0.32).
 - **ISS-Transits, Animationen** – wie bei PIPP (geplant).
 
-Die Verarbeitung läuft lokal – als Windows-App oder im Browser.
+Die Verarbeitung läuft lokal – als Windows-App oder im Browser: **[astrotool.ai-suisse.com](https://astrotool.ai-suisse.com)** (nichts zu installieren, die Fotos bleiben auf dem eigenen Gerät).
 
 - **Phase 1 – Web-Version** (`web/`): läuft komplett im Browser, Dateien verlassen den Rechner nicht.
 - **Phase 2 – Windows-App** (ab Windows 11): gleiche Oberfläche als Tauri-App mit nativer Engine und modernem FFmpeg.
@@ -26,6 +27,8 @@ Hintergrund und Plan: [docs/reverse-engineering](docs/reverse-engineering/).
 ## Windows-App (.exe)
 
 Schwerpunkt der Entwicklung. Installer (~2 MB) bzw. portable .exe (~9 MB), Windows 10/11, keine weiteren Programme nötig. Noch nicht signiert: Beim ersten Start kann SmartScreen „Der Computer wurde durch Windows geschützt“ melden – „Weitere Informationen“ → „Trotzdem ausführen“; Astrotool nur von der Release-Seite dieses Repos herunterladen. Bauen und Details: [docs/windows-app.md](docs/windows-app.md).
+
+**macOS und Linux (experimentell, seit 0.35):** Die Releases enthalten auch ein `.dmg` für macOS (Apple Silicon und Intel) sowie AppImage und `.deb` für Linux. Sie werden auf GitHub automatisch gebaut und probeweise gestartet, sind aber noch nicht auf echten Geräten geprüft – Rückmeldungen sind willkommen. Die macOS-App ist nicht von Apple beglaubigt: Beim ersten Start verweigert macOS das Öffnen; unter *Systemeinstellungen → Datenschutz & Sicherheit → Dennoch öffnen* lässt es sich erlauben.
 
 ## Web-Version starten
 
@@ -60,6 +63,11 @@ Tests: `npm test` · Produktions-Build: `npm run build` (Ausgabe in `web/dist`, 
 | **Kamera-RAW:** Sensordaten (16 bit, linear, Bayer) von DNG, Canon CR2, Sony ARW (verlustfrei, verlustbehaftet „cRAW“ und unkomprimiert – 0.27), Nikon NEF (komprimiert), Samsung SRW (NX1/NX500, NX300-Familie mit NX300M und NX2000, NX100-Familie – 0.27/0.30), Fujifilm RAF unkomprimiert mit Bayer-Sensor (z. B. X-A5, 0.27) und mit X-Trans-Muster, auch als DNG (0.21, eigene Farbrekonstruktion); für CR3, komprimierte RAF, ORF, RW2 … das eingebettete Kamerabild in voller Grösse. Weissabgleich automatisch aus dem Kamerabild, Aufnahmedaten aus EXIF | – | ✅ 0.11 |
 | **Finsternis-Modus:** Zentrieren per Kreis am Sonnenrand, auch bei schmaler Sichel | – (neu) | ✅ |
 | **Einfach-Modus** für Finsternis-Serien: ein Knopf von den Fotos zum MP4 (1080 × 1080, H.264). Sortiert nach Aufnahmezeit, nimmt nur die Kamera mit den meisten Fotos, verwirft verwackelte/unscharfe Bilder (Sonnenrand breiter als in den Nachbarbildern), überstrahlte und Bilder ohne Sonne (Landschaft, Personen); gleicht verschiedenen Zoom aus; Ausschnitt nach der Sonnengrösse; zeittreue Zeitachse: unregelmässige Abstände laufen gleichmässig, Lücken werden mit berechneten Bildern gefüllt (Mond entlang seiner Bahn verschoben), Totalität langsamer; Zusammenfassung in einfacher Sprache (0.34) | – (neu) | ✅ 0.34 (eigene Serie NX500 ohne Sonnenfilter, Handy-Serie Pixel mit verschiedenem Zoom, gemischter Ordner mit Landschaften und Personen, Totalität 2026) |
+| **Einfach-Modus für Mondfinsternisse:** Kreis am Mondrand (der Erdschatten hat keinen scharfen Rand); jedes glaubhaft gemessene Foto bleibt, egal mit welchem Zoom; Nachtaufnahmen ohne Mond werden verworfen (wenig Rand, grosse Streuung); zwischen den Fotos wird überblendet | – (neu) | ✅ 0.35 (Handy-Serie Samsung S24 Ultra der totalen Mondfinsternis vom 07.09.2025: 14 Mondfotos im Film, 14 Landschaften verworfen; 30 Nachtaufnahmen einer Veranstaltung: nur das eine Mondfoto bleibt) |
+| **iPhone-Fotos (HEIC/HEIF):** Aufbau der Datei selbst gelesen (Raster aus HEVC-Kacheln, Drehung, Exif), dekodiert mit dem HEVC-Dekoder des Systems über WebCodecs – keine fremde Bibliothek | – (neu) | ✅ 0.35 (iPhone 11 Pro Max und 13 Pro Max, Nokia 8.3, Beispieldateien der HEIF-Konformitätssammlung; 12 MP in 0.4 s) |
+| **Format des Films** im Einfach-Modus: quadratisch, Hochformat 9:16 oder Querformat 16:9, Titel und Uhrzeit über und unter dem Bild; bei wenigen Fotos kürzer | – (neu) | ✅ 0.35 |
+| **Schnelle Analyse** von Fotoserien: Das Objekt wird in einer verkleinerten Ansicht gesucht, nur der Ausschnitt darum in voller Auflösung gelesen | – (neu) | ✅ 0.35 (77 Fotos mit 28 MP: 64 s statt 160 s, gleiche 73 Fotos im Film) |
+| **Zwischenbilder über grosse Lücken** (Mond um mehr als ein Viertel des Sonnenradius gewandert): Modell des Fotos – Helligkeit nach Abstand vom Rand der sichtbaren Sonne – statt Verschieben; der Mondrand wird je Foto nachgemessen | – (neu) | ✅ 0.35 (eigene Serie, Lücke 21 min: ohne dunkle Flecken und Reste des alten Mondrands) |
 | **Totalität:** Ausrichtung am Mondrand (dunkle Scheibe in der Korona, automatisch erkannt), Belichtungsreihen (EXIF-Belichtungszeit) zu einem HDR-Bild zusammengefasst – innere und äussere Korona in einem Bild, Zeitraffer ohne Flackern; Himmelsschleier samt Verlauf abgezogen (0.23); Kennlinie der Kamera aus jeder Reihe bestimmt, damit Kamera-JPEGs ohne Ringe zusammenpassen, falsche Ränder an den Kontakten (Sichel, Diamantring, überbelichtete innere Korona) verworfen (0.33) | – (neu) | ✅ 0.9 (künstliche Serien; echte Serien NASA Eclipse Megamovie 2024 und Totalität 12.08.2026 mit Teleskop bei tiefer Sonne) |
 | **Phasenmontage** einer Finsternis: ausgewählte Bilder als Bogen (Weg der Sonne), Reihe oder Raster, Totalität in der Mitte, Uhrzeit unter jeder Scheibe, ein grosses PNG | – (neu) | ✅ 0.15 |
 | PNG-Einzelbilder als ZIP oder direkt in einen Ordner, mit Protokoll (CSV) | `-png` | ✅ |
@@ -93,6 +101,8 @@ Die Analyse von PIPP läuft mit [rea](https://github.com/morluto/rea) (MCP-Serve
 Für die Analyse der nativen Engine (`pipp_core.exe`) braucht rea zusätzlich Ghidra + JDK 21.
 
 ## Datenschutz
+
+Die Web-Version unter astrotool.ai-suisse.com ist dasselbe Programm, ausgeliefert über GitHub Pages; wie bei jeder Webseite sieht der Anbieter (GitHub) die Adresse, von der aus der Browser zugreift. Fotos und Videos werden im Browser verarbeitet und nie hochgeladen.
 
 Dieses Programm überträgt keine Informationen an andere Systeme im Netz, ausser die Benutzerin oder der Benutzer verlangt es ausdrücklich. Astrotool arbeitet offline mit den eigenen Dateien. Der Installer lädt Microsoft WebView2 nur, wenn es auf dem Computer fehlt; Hilfsprogramme wie FFmpeg werden nur per Klick auf *Installieren* unter *Tools & Setup* über winget installiert.
 

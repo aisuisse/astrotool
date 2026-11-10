@@ -220,6 +220,11 @@ body.easy main > .stage, body.easy main > aside, body.easy .expertOnly { display
 .easy { display: flex; flex-direction: column; gap: 14px; }
 .easy h1 { margin: 6px 0 0; font-size: 26px; }
 .easyKind { align-self: flex-start; }
+/* nur im Browser (in der Desktop-App ausgeblendet) */
+body.app .webOnly { display: none !important; }
+a.btn { text-decoration: none; }
+.easyFooter { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; color: var(--muted); font-size: 13px; text-align: center; }
+.easyFooter a { color: inherit; }
 .easyKind button { padding: 8px 18px; white-space: nowrap; }
 .easy .lead { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
 .easyDrop { min-height: 220px; text-align: center; }
@@ -232,4 +237,12 @@ body.easy main > .stage, body.easy main > aside, body.easy .expertOnly { display
 .easyResult .row { display: flex; gap: 10px; flex-wrap: wrap; }
 .easyResult ul { margin: 0; padding-left: 20px; color: var(--muted); }
 .easyResult details small { display: block; max-height: 240px; overflow: auto; }
-@media (max-width: 600px) { body.easy main { padding: 12px; } .easy h1 { font-size: 22px; } }
+@media (max-width: 600px) {
+  body.easy main { padding: 12px; }
+  .easy h1 { font-size: 22px; }
+  /* Handy: Kopfzeile schmal – Untertitel weg, Knöpfe umbrechen */
+  .brand small { display: none; }
+  .topbar { flex-wrap: wrap; gap: 8px; }
+  .easyKind { align-self: stretch; }
+  .easyKind button { padding: 8px 6px; }
+}

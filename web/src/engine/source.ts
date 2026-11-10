@@ -151,22 +151,20 @@ export class ImageSequenceSource implements FrameSource {
       allTimed && a.timeMs !== b.timeMs ? a.timeMs! - b.timeMs! : a.name.localeCompare(b.name, undefined, { numeric: true }),
     );
     // Bildgrösse vom ersten lesbaren Bild übernehmen – mit mainCamera vom grössten (Handys speichern Ausschnitte
-    // nach dem Zoomen kleiner; ein grösseres Bild würde sonst beschnitten). Hoch- und Querformat gemischt: Das
-    // Bildfeld umfasst beide, damit keine Sonne am Rand abgeschnitten wird.
+    // nach dem Zoomen kleiner; ein grösseres Bild würde sonst beschnitten). Hoch- und Querformat gemischt: Es gilt
+    // das Format des grössten bzw. ersten Bildes; die anderen liegen mittig darin. (Ein Bildfeld, das beide Formate
+    // umfasst, verschob bei einer echten Handy-Serie die Schwellen der Sonnensuche – 3 statt 9 Fotos im Film.)
     let order = entries;
-    let maxW = 0, maxH = 0;
     if (opts.mainCamera) {
       const sizes = await Promise.all(entries.map((e) => (e.raw ? null : imageSize(e.file, e.exif))));
       const area = sizes.map((s) => (s ? s.width * s.height : 0));
       const k = area.indexOf(Math.max(...area));
       if (k > 0) order = [entries[k], ...entries.filter((_, i) => i !== k)];
-      for (const s of sizes) if (s) { maxW = Math.max(maxW, s.width); maxH = Math.max(maxH, s.height); }
     }
     for (const e of order) {
       try {
         const first = await decode(e.file, e.raw);
-        const fit = !first.frame;
-        const src = new ImageSequenceSource(entries, fit ? Math.max(first.width, maxW) : first.width, fit ? Math.max(first.height, maxH) : first.height, decode, first);
+        const src = new ImageSequenceSource(entries, first.width, first.height, decode, first);
         src.skipped = skipped;
         src.padBackground = !!opts.mainCamera;
         return src;

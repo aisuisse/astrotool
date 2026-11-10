@@ -3,8 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Astrotool</title>
-    <meta name="description" content="Prepare videos and image series of planets, the Moon, the Sun and solar eclipses for stacking: find the object, centre, crop, sort by sharpness – right in your browser." />
+    <title>Astrotool – eclipse films and astro pre-processing</title>
+    <meta name="description" content="Turn your photos of a solar or lunar eclipse into a film with one click – and prepare videos and image series of planets, the Moon and the Sun for stacking. Free, open source, runs in your browser; your photos stay on your device." />
+    <meta name="theme-color" content="#0d1117" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Astrotool – eclipse films and astro pre-processing" />
+    <meta property="og:description" content="Turn your photos of a solar or lunar eclipse into a film with one click. Free, open source, runs in your browser – your photos stay on your device." />
+    <meta property="og:image" content="https://astrotool.ai-suisse.com/og.jpg" />
+    <meta property="og:url" content="https://astrotool.ai-suisse.com/" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./icon-32.png" />
+    <link rel="apple-touch-icon" href="./icon-256.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
@@ -15,6 +24,7 @@
         <small data-i18n="app.tagline">Pre-processing for planets, Moon, Sun &amp; eclipses</small>
       </div>
       <div class="actions">
+        <a class="btn webOnly" href="https://github.com/aisuisse/astrotool/releases/latest" target="_blank" rel="noopener" data-i18n="web.getApp" data-i18n-title="web.getAppTitle" title="Astrotool as a Windows app (also macOS and Linux, experimental)">Get the app</a>
         <div class="seg uiSwitch" role="radiogroup" aria-label="Mode" data-i18n-title="ui.switchTitle" title="Easy: eclipse film in one click · Expert: all settings">
           <button data-ui="easy" data-i18n="ui.easy">Easy</button>
           <button data-ui="expert" class="on" data-i18n="ui.expert">Expert</button>
@@ -80,6 +90,10 @@
         </div>
         <div id="easyResult" class="easyResult" hidden></div>
         <p id="easyError" class="error" role="alert" hidden></p>
+        <footer class="webOnly easyFooter">
+          <span data-i18n="web.private">Your photos stay on your device – nothing is uploaded.</span>
+          <span><a href="https://github.com/aisuisse/astrotool" target="_blank" rel="noopener" data-i18n="web.source">Free software (GPL) – source code on GitHub</a> · <a href="https://github.com/aisuisse/astrotool/releases/latest" target="_blank" rel="noopener" data-i18n="web.getAppLong">Windows app</a></span>
+        </footer>
       </section>
       <section class="stage">
         <div id="drop" class="drop">
