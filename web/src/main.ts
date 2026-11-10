@@ -1162,13 +1162,20 @@ function setEasyKind(k: EasyKind) {
 }
 document.querySelectorAll<HTMLButtonElement>("#easyKind [data-kind]").forEach((b) => b.addEventListener("click", () => { if (!busy) setEasyKind(b.dataset.kind as EasyKind); }));
 
+/**
+ * Kleinster Durchmesser von Sonne oder Mond im Foto (px), damit es in den Film kommt. Kleiner (Weitwinkel-Foto mit
+ * der Sonne als Punkt) müsste auf das Zehnfache vergrössert werden. Echte Serien: kleinste brauchbare Sonne 272 px
+ * (Handy, wenig Zoom), kleinster Mond 262 px.
+ */
+const EASY_MIN_SIZE = 120;
+
 /** Einstellungen des Einfach-Modus: Finsternis-Vorgabe, Ausschnitt nach Sonnengrösse, Verwackeltes verwerfen */
 function easySettings(title: string): { options: ProcessOptions; timelapse: TimelapseOptions; montage: MontageOptions } {
   const shape = $<HTMLSelectElement>("easyShape").value as NonNullable<TimelapseOptions["shape"]>;
   try { localStorage.setItem("astrotool-easy-shape", shape); } catch { /* egal */ }
   return {
     // Mondfinsternis: der Mond selbst ist die Scheibe – keine Belichtungsreihen der Korona
-    options: { ...structuredClone(defaultOptions), ...presets.eclipse, cropAuto: true, rejectBlurred: true, strictSun: true, matchSize: true, fastAnalyse: true, ...(easyKind === "lunar" ? { subject: "moon" as const, hdr: false } : {}) },
+    options: { ...structuredClone(defaultOptions), ...presets.eclipse, cropAuto: true, rejectBlurred: true, strictSun: true, matchSize: true, fastAnalyse: true, minObjectSize: EASY_MIN_SIZE, ...(easyKind === "lunar" ? { subject: "moon" as const, hdr: false } : {}) },
     timelapse: { ...structuredClone(defaultTimelapse), enabled: true, format: "mp4-h264", timing: "real", seconds: 24, secondsPerPhoto: 1.5, holdLastSeconds: 2.5, width: 1080, upscale: true, showTime: true, title, shape },
     montage: { ...structuredClone(defaultMontage), enabled: true, title },
   };

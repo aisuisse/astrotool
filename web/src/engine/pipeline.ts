@@ -353,6 +353,10 @@ export function detect(lum: Lum, o: ProcessOptions, whole?: WholeView): FrameDet
         const minSide = whole ? Math.min(whole.width, whole.height) : Math.min(lum.width, lum.height);
         // Ausnahme für die dünne Sichel kurz vor der Totalität: wenig Helles in der Sichel, daneben etwas Dunst
         det.disc.plausible = fit.r <= 0.45 * minSide && (b.share <= 0.3 || (fit.visibleLimb <= 0.45 && b.perDisc <= 0.1));
+        // Sonne: Ein sehr grosser Kreis (Radius über ein Fünftel der kurzen Bildseite) muss eng am Rand liegen.
+        // Fotos ohne brauchbare Sonne – durch eine Finsternisbrille, Zimmer, Landschaft – ergeben grosse Kreise durch
+        // irgendwelche Kanten mit 1.6–1.7 % Streuung; echte stark herangezoomte Sicheln liegen bei 0.3–0.5 %.
+        if (!lunar && fit.r > 0.2 * minSide && fit.rms > Math.max(3, 0.01 * fit.r)) det.disc.plausible = false;
         // Mond: Nachtaufnahmen (Menschen, Lichter, Wolken) ergeben oft einen grossen „Kreis“ durch irgendwelche
         // Kanten – wenig Rand und grosse Streuung. Ein echter Mondrand liegt eng am Kreis oder ist weit herum
         // sichtbar (auch weich und verrauscht in der Totalität: Streuung bis 2 % des Radius, echte Handy-Serie).

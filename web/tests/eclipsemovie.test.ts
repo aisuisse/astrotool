@@ -235,6 +235,26 @@ describe("Ist das die Sonne? (Einfach-Modus)", () => {
     const d = detect(sunLum(300, 200, { cx: 150, cy: 100, r: 40 }, 1), o);
     expect(d.disc?.plausible).toBe(true);
   });
+  it("sehr grosser Kreis mit unruhigem Rand (helle Fläche, keine Sonne): nein – mit sauberem Rand: ja", () => {
+    // helle Scheibe, Radius ein Drittel der kurzen Bildseite; der Rand schwankt um ±10 px (2.5 % des Radius)
+    const W = 1600, H = 1200, r0 = 400;
+    const blob = (wobble: number): Lum => {
+      const data = new Float32Array(W * H);
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const dx = x - 800, dy = y - 600, a = Math.atan2(dy, dx);
+          const r = r0 + wobble * (Math.sin(7 * a) + 0.6 * Math.sin(13 * a + 1));
+          data[y * W + x] = 0.05 + 0.85 / (1 + Math.exp((Math.hypot(dx, dy) - r) / 0.8));
+        }
+      return { width: W, height: H, data };
+    };
+    const rough = detect(blob(8), o);
+    expect(rough.disc === undefined || rough.disc.plausible === false).toBe(true);
+    expect(judge(0, rough, o).accepted).toBe(false);
+    const clean = detect(blob(0), o);
+    expect(clean.disc?.plausible).toBe(true);
+    expect(judge(0, clean, o).accepted).toBe(true);
+  });
   it("Landschaft mit hellem Himmel über die ganze Breite: nein", () => {
     const data = new Float32Array(300 * 200);
     for (let y = 0; y < 200; y++) for (let x = 0; x < 300; x++) data[y * 300 + x] = y < 90 ? 0.85 + 0.1 * Math.sin(x / 17) : 0.15 + 0.05 * Math.sin(x / 5 + y / 7);
