@@ -40,6 +40,12 @@ export interface TimelapseOptions {
    * angezeigt wird die Ortszeit der Aufnahme. Setzt der Worker.
    */
   clockShiftMs?: number;
+  /**
+   * Format des Films: "source" wie die Bilder, "portrait" 9:16 (Status, Reels, Shorts), "landscape" 16:9
+   * (YouTube, Fernseher). Das Bild wird eingepasst, der Rest bleibt schwarz; Titel und Uhrzeit stehen dann
+   * über und unter dem Bild.
+   */
+  shape?: "source" | "portrait" | "landscape";
 }
 
 export const defaultTimelapse: TimelapseOptions = {
@@ -85,6 +91,29 @@ export function outputSize(w: number, h: number, o: Pick<TimelapseOptions, "widt
     th -= th % 2;
   }
   return [Math.max(2, tw), Math.max(2, th)];
+}
+
+/**
+ * Grösse des Films und Lage des Bildes darin. Ohne Rahmenformat füllt das Bild den Film; mit "portrait" (9:16)
+ * oder "landscape" (16:9) wird es mittig eingepasst.
+ */
+export function filmLayout(w: number, h: number, o: Pick<TimelapseOptions, "width" | "format" | "shape"> & { upscale?: boolean }): { W: number; H: number; x: number; y: number; w: number; h: number } {
+  const [iw, ih] = outputSize(w, h, o);
+  const shape = o.shape ?? "source";
+  if (shape === "source") return { W: iw, H: ih, x: 0, y: 0, w: iw, h: ih };
+  const ratio = shape === "portrait" ? 9 / 16 : 16 / 9;
+  // Film so gross, dass das Bild gerade hineinpasst
+  let W = Math.max(iw, Math.round(ih * ratio)), H = Math.round(W / ratio);
+  let s = 1;
+  if (isMp4(o.format) && Math.max(W, H) > MP4_MAX_LONG_SIDE) s = MP4_MAX_LONG_SIDE / Math.max(W, H);
+  W = Math.round(W * s);
+  H = Math.round(H * s);
+  if (o.format !== "gif") {
+    W -= W % 2;
+    H -= H % 2;
+  }
+  const dw = Math.min(W, Math.round(iw * s)), dh = Math.min(H, Math.round(ih * s));
+  return { W, H, x: Math.floor((W - dw) / 2), y: Math.floor((H - dh) / 2), w: dw, h: dh };
 }
 
 /** Bildrate der MP4-Datei: konstant 30 (oder 60 bei sehr schnellen Zeitraffern) – das erwarten Handys und Plattformen. */

@@ -4,7 +4,7 @@ import { GIFEncoder, applyPalette, quantize } from "gifenc";
 import type { Frame } from "./engine/ser";
 import { msg } from "./i18n";
 import { setMp4CreationTime } from "./engine/mp4time";
-import { buildSequence, constantRateCounts, isMp4, outputSize, ticksToClock, videoFrameRate, type TimelapseOptions } from "./engine/timelapse";
+import { buildSequence, constantRateCounts, filmLayout, isMp4, ticksToClock, videoFrameRate, type TimelapseOptions } from "./engine/timelapse";
 import { blendFrames, defaultMovie, fillMoonTrack, planMovie, synthFrame, type MovieFrame, type MovieStep, type Rgba } from "./engine/eclipsemovie";
 
 /** Ein konkreter Encoder-Plan. Die Codec-Strings legen Profil und Level fest, die Handys sicher abspielen. */
@@ -157,7 +157,10 @@ export class TimelapseRecorder {
       }
     }
     const seqLength = runs.reduce((a, r) => a + r.count, 0);
-    const [W, H] = outputSize(this.width, this.height, o);
+    const lay = filmLayout(this.width, this.height, o);
+    const { W, H } = lay;
+    // Balken über und unter dem Bild (Hochformat): Titel und Uhrzeit stehen dort statt im Bild
+    const bars = lay.y > lay.h * 0.12;
     const canvas = new OffscreenCanvas(W, H);
     const g = canvas.getContext("2d", { willReadFrequently: o.format === "gif" || !!native })!;
     g.imageSmoothingQuality = "high";
@@ -169,15 +172,15 @@ export class TimelapseRecorder {
       g.fillRect(0, 0, W, H);
       if (s.mode === "real") {
         const bmp = await createImageBitmap(this.frames[idx].blob);
-        g.drawImage(bmp, 0, 0, W, H);
+        g.drawImage(bmp, lay.x, lay.y, lay.w, lay.h);
         bmp.close();
       } else {
         const A = await this.pixels(s.a), B = await this.pixels(s.b);
         const px = s.mode === "synth" ? synthFrame(A, B, movie[s.a], movie[s.b], s.w) : blendFrames(A, B, s.w);
         mix!.getContext("2d")!.putImageData(new ImageData(px, this.width, this.height), 0, 0);
-        g.drawImage(mix!, 0, 0, W, H);
+        g.drawImage(mix!, lay.x, lay.y, lay.w, lay.h);
       }
-      const size = Math.max(12, Math.round(H * 0.045));
+      const size = Math.max(12, Math.round(lay.h * 0.045));
       g.font = `600 ${size}px system-ui, "Segoe UI", sans-serif`;
       g.textBaseline = "alphabetic";
       g.lineJoin = "round";
@@ -191,20 +194,20 @@ export class TimelapseRecorder {
       };
       if (o.title) {
         // Langer Titel in schmalem Video: Schrift verkleinern, bis er in die Breite passt (nicht abschneiden)
-        const fit = Math.min(1, (W - 2 * pad) / Math.max(1, g.measureText(o.title).width));
+        const fit = Math.min(1, (lay.w - 2 * pad) / Math.max(1, g.measureText(o.title).width));
         if (fit < 1) {
           const small = Math.max(9, Math.floor(size * fit));
           g.font = `600 ${small}px system-ui, "Segoe UI", sans-serif`;
           g.lineWidth = Math.max(2, small / 6);
         }
-        text(o.title, pad, pad + size);
+        text(o.title, lay.x + pad, bars ? lay.y - pad : lay.y + pad + size);
         g.font = `600 ${size}px system-ui, "Segoe UI", sans-serif`;
         g.lineWidth = Math.max(2, size / 6);
       }
       // Zwischenbilder: Uhrzeit zu ihrer Zeit (läuft gleichmässig weiter)
       const stamp = real ? stamps[0] + BigInt(Math.round(s.t * 1e7)) : this.frames[idx].stamp;
       const clock = o.showTime ? ticksToClock(stamp, o.clockShiftMs) : "";
-      if (clock) text(clock, pad, H - pad);
+      if (clock) text(clock, lay.x + pad, bars ? lay.y + lay.h + pad + size : lay.y + lay.h - pad);
     };
 
     const total = runs.length;

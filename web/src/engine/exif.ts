@@ -1,5 +1,6 @@
 // Minimaler EXIF-Leser für JPEG: liefert Aufnahmezeit und Kamera.
 // Liest nur die ersten 128 KB der Datei.
+import { isHeif, readHeifExif } from "./heif";
 
 export interface ExifInfo {
   /** Aufnahmezeit als Text "YYYY:MM:DD hh:mm:ss" (lokale Kamerazeit) */
@@ -13,6 +14,8 @@ export interface ExifInfo {
   fNumber?: number;
   iso?: number;
   focalLength?: number;
+  /** EXIF-Ausrichtung 1–8 (5–8: Bild liegt auf der Seite). Bei HEIC nicht gesetzt – dort gilt die Drehung der Datei. */
+  orientation?: number;
 }
 
 /**
@@ -32,7 +35,7 @@ export function readExif(buf: ArrayBuffer): ExifInfo {
     const off = v.getUint32(84), len = v.getUint32(88);
     return off + 4 < v.byteLength ? readExif(buf.slice(off, Math.min(v.byteLength, off + len))) : {};
   }
-  if (v.getUint32(4) === 0x66747970 /* ftyp */) return readCr3(buf);
+  if (v.getUint32(4) === 0x66747970 /* ftyp */) return isHeif(new Uint8Array(buf, 0, Math.min(64, v.byteLength))) ? {} : readCr3(buf);
   if (m !== 0xffd8) return {};
   let off = 2;
   while (off + 4 <= v.byteLength) {
@@ -96,6 +99,7 @@ function parseTiff(v: DataView, base: number, end: number, ifd0IsExif = false): 
   if (!ifd0IsExif) readIfd(u32(base + 4), (tag, type, count, o) => {
     if (tag === 0x010f) out.make = str(o, count);
     if (tag === 0x0110) out.model = str(o, count);
+    if (tag === 0x0112) out.orientation = num(type, o);
     if (tag === 0x8769) exifIfd = num(type, o) ?? 0;
   });
   readIfd(exifIfd, (tag, type, count, o) => {
@@ -127,6 +131,13 @@ export function exifTimeMs(e: ExifInfo): number | null {
  */
 export async function readExifBlob(file: Blob, headBytes = 262144): Promise<ExifInfo> {
   const head = await file.slice(0, headBytes).arrayBuffer();
+  if (isHeif(new Uint8Array(head, 0, Math.min(64, head.byteLength)))) {
+    // HEIC (iPhone): Exif-Block als eigener Teil der Datei; gedreht wird nach der Angabe der Datei, nicht nach Exif
+    const tiff = await readHeifExif(file);
+    const e = tiff ? readExif(tiff) : {};
+    delete e.orientation;
+    return e;
+  }
   const first = readExif(head);
   if (first.dateTimeOriginal || head.byteLength < 8) return first;
   const v = new DataView(head);

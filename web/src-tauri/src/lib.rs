@@ -1,7 +1,7 @@
-// Astrotool – Windows-App (Tauri 2).
+// Astrotool – Desktop-App (Tauri 2): Windows, experimentell auch macOS und Linux.
 // Die Oberfläche ist dieselbe Web-App wie im Browser. Nativ kommen nur hinzu:
 //  - tools_status: prüft, welche Hilfsprogramme installiert sind
-//  - install_tool: installiert ein Hilfsprogramm per winget – nur aus einer festen Liste
+//  - install_tool: installiert ein Hilfsprogramm per winget – nur aus einer festen Liste, nur unter Windows
 //  - hevc_*: H.265/HEVC-Kodierung über das lokale FFmpeg (WebView2 kann kein HEVC)
 
 mod hevc;
@@ -28,12 +28,25 @@ pub(crate) fn command(program: &str) -> Command {
     c
 }
 
-/// Sucht ein Programm im PATH und in den üblichen winget-Ablagen.
+/// Sucht ein Programm im PATH und in den üblichen Ablagen (winget, Homebrew).
 pub(crate) fn find_program(name: &str) -> Option<String> {
-    let out = command("where").arg(name).output().ok()?;
-    if out.status.success() {
-        let s = String::from_utf8_lossy(&out.stdout);
-        return s.lines().next().map(|l| l.trim().to_string());
+    let finder = if cfg!(windows) { "where" } else { "which" };
+    if let Ok(out) = command(finder).arg(name).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(l) = s.lines().next() {
+                return Some(l.trim().to_string());
+            }
+        }
+    }
+    // macOS/Linux: Aus dem Finder gestartete Apps haben einen kurzen PATH (ohne Homebrew).
+    if !cfg!(windows) {
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
+            let p = std::path::Path::new(dir).join(name);
+            if p.exists() {
+                return Some(p.to_string_lossy().into_owned());
+            }
+        }
     }
     // Direkt nach einer winget-Installation ist der PATH dieses Prozesses noch alt.
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
@@ -51,6 +64,9 @@ struct ToolStatus {
     command: String,
     installed: bool,
     path: Option<String>,
+    /// Kann die App das Programm selbst installieren? (nur Windows, per winget)
+    #[serde(rename = "canInstall")]
+    can_install: bool,
 }
 
 #[tauri::command]
@@ -59,7 +75,7 @@ fn tools_status() -> Vec<ToolStatus> {
         .iter()
         .map(|(id, cmd)| {
             let path = find_program(cmd);
-            ToolStatus { id: id.to_string(), command: cmd.to_string(), installed: path.is_some(), path }
+            ToolStatus { id: id.to_string(), command: cmd.to_string(), installed: path.is_some(), path, can_install: cfg!(windows) }
         })
         .collect()
 }
@@ -75,6 +91,9 @@ struct InstallResult {
 async fn install_tool(id: String) -> Result<InstallResult, String> {
     if !TOOLS.iter().any(|(t, _)| *t == id) {
         return Err(format!("not allowed: {id}"));
+    }
+    if !cfg!(windows) {
+        return Err("winget is only available on Windows".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
         let out = command("winget")

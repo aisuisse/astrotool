@@ -48,7 +48,7 @@ async function runChecks(): Promise<Check[]> {
 /** Läuft Astrotool als Windows-App (Tauri)? Dann kann das Menü wirklich installieren. */
 export const isDesktopApp = () => "__TAURI_INTERNALS__" in window;
 
-interface NativeStatus { id: string; command: string; installed: boolean; path: string | null }
+interface NativeStatus { id: string; command: string; installed: boolean; path: string | null; canInstall?: boolean }
 
 async function nativeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -75,18 +75,23 @@ export function initTools(getLang: () => Lang) {
     const checkRows = checks
       ? checks.map((c) => `<li class="${c.ok ? "ok" : "bad"}"><span>${c.ok ? "✓" : "✗"}</span><div><strong>${esc(L(c.key))}</strong>${c.ok ? "" : `<small>${esc(L(c.hint))}</small>`}</div></li>`).join("")
       : `<li><small>${esc(L("tools.checking"))}</small></li>`;
+    // Desktop-App auf macOS oder Linux: Dort kann die App nichts installieren
+    const other = app && !!native?.length && native.every((n) => n.canInstall === false);
     const toolRows = LOCAL_TOOLS.map((tool) => {
       const cmd = tool.winget ? `winget install --id ${tool.winget} -e` : "";
       const st = native?.find((n) => n.id === tool.winget);
       const log = tool.winget ? installLog.get(tool.winget) : undefined;
       let action: string;
-      if (app && st) {
+      if (app && st && (st.installed || st.canInstall !== false)) {
         action = st.installed
           ? `<span class="okText">✓ ${esc(L("tools.installed"))}</span>${st.path ? `<br><small class="tag">${esc(st.path)}</small>` : ""}`
           : installing.has(st.id)
             ? `<span>${esc(L("tools.installing"))}</span>`
             : `<button class="btn primary tiny" data-install="${esc(st.id)}">${esc(L("tools.install"))}</button>`;
         if (log && !log.ok) action += `<details><summary class="error">${esc(L("tools.installFailed"))}</summary><pre>${esc(log.output.slice(-1500))}</pre></details>`;
+      } else if (other) {
+        // macOS/Linux: kein winget – auf die Download-Seite verweisen
+        action = `<a href="${tool.link}" target="_blank" rel="noopener">${esc(L("tools.download"))}</a>`;
       } else {
         action = cmd ? `<code>${esc(cmd)}</code> <button class="btn tiny" data-copy="${esc(cmd)}">${esc(L("tools.copy"))}</button>` : `<a href="${tool.link}" target="_blank" rel="noopener">${esc(L("tools.download"))}</a>`;
       }
@@ -98,11 +103,11 @@ export function initTools(getLang: () => Lang) {
     }).join("");
     const runCmd = "powershell -ExecutionPolicy Bypass -File .\\setup-windows.ps1";
     body.innerHTML = `
-      <p>${esc(L(app ? "tools.introApp" : "tools.intro"))}</p>
+      <p>${esc(L(other ? "tools.introAppOther" : app ? "tools.introApp" : "tools.intro"))}</p>
       <h3>${esc(L("tools.browserTitle"))}</h3>
       <ul class="checks">${checkRows}</ul>
       <h3>${esc(L("tools.localTitle"))}</h3>
-      <p><small>${esc(L(app ? "tools.localIntroApp" : "tools.localIntro"))}</small></p>
+      <p><small>${esc(L(other ? "tools.localIntroOther" : app ? "tools.localIntroApp" : "tools.localIntro"))}</small></p>
       <div class="tablewrap"><table class="tools"><tbody>${toolRows}</tbody></table></div>
       ${app ? "" : `<h3>${esc(L("tools.scriptTitle"))}</h3>
       <p><small>${esc(L("tools.scriptIntro"))}</small></p>

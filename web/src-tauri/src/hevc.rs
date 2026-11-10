@@ -22,10 +22,11 @@ fn encoder_args(name: &str) -> Vec<&'static str> {
         "hevc_amf" => vec!["-c:v", "hevc_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "20", "-qp_p", "22"],
         "hevc_nvenc" => vec!["-c:v", "hevc_nvenc", "-preset", "p6", "-rc", "vbr", "-cq", "22"],
         "hevc_qsv" => vec!["-c:v", "hevc_qsv", "-global_quality", "22"],
+        "hevc_videotoolbox" => vec!["-c:v", "hevc_videotoolbox", "-b:v", "8M"],
         _ => vec!["-c:v", "hevc_mf", "-b:v", "8M"],
     }
 }
-const CANDIDATES: &[&str] = &["libx265", "hevc_amf", "hevc_nvenc", "hevc_qsv", "hevc_mf"];
+const CANDIDATES: &[&str] = &["libx265", "hevc_videotoolbox", "hevc_amf", "hevc_nvenc", "hevc_qsv", "hevc_mf"];
 
 /// Erstes Encoder, das auf diesem Rechner wirklich funktioniert (einmal ermittelt).
 fn working_encoder(ffmpeg: &str) -> Option<&'static str> {

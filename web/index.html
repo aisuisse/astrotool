@@ -21,7 +21,7 @@
         </div>
         <label class="btn primary expertOnly">
           <span data-i18n="btn.open">Open</span>
-          <input id="file" type="file" accept=".ser,.avi,.mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden />
+          <input id="file" type="file" accept=".ser,.avi,.mp4,.m4v,.mov,.mkv,.webm,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.heic,.heif,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden />
         </label>
         <label class="btn expertOnly" title="A folder with sub-folders: every sub-folder of images and every video becomes one recording of a batch" data-i18n-title="btn.openFolderTitle">
           <span data-i18n="btn.openFolder">Open folder</span>
@@ -50,7 +50,7 @@
           <div>
             <strong id="easyDropTitle" data-i18n="easy.dropTitle">Drop your photos or a folder here</strong>
             <div class="easyPick">
-              <label class="btn primary"><span data-i18n="easy.pickFiles">Choose photos</span><input id="easyFiles" type="file" multiple hidden accept=".jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" /></label>
+              <label class="btn primary"><span data-i18n="easy.pickFiles">Choose photos</span><input id="easyFiles" type="file" multiple hidden accept=".jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp,.heic,.heif,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" /></label>
               <label class="btn"><span data-i18n="easy.pickFolder">Choose folder</span><input id="easyFolder" type="file" webkitdirectory multiple hidden /></label>
             </div>
             <p class="muted" data-i18n="easy.dropHint">JPG or RAW straight from the camera, in any order and at any interval. Your photos stay on your computer.</p>
@@ -59,6 +59,13 @@
         <div id="easyReady" class="easyReady" hidden>
           <dl id="easyInfo" class="info"></dl>
           <label class="easyTitle"><span data-i18n="easy.titleLabel">Title in the film (optional)</span><input id="easyTitleIn" type="text" maxlength="80" data-i18n-placeholder="tl.titlePlaceholder" placeholder="e.g. Partial solar eclipse 12 Aug 2026" /></label>
+          <label class="easyTitle"><span data-i18n="easy.shapeLabel">Film format</span>
+            <select id="easyShape">
+              <option value="source" data-i18n="easy.shape.square">Square – WhatsApp, e-mail, photo album</option>
+              <option value="portrait" data-i18n="easy.shape.portrait">Portrait 9:16 – status, Reels, Shorts, TikTok</option>
+              <option value="landscape" data-i18n="easy.shape.landscape">Landscape 16:9 – YouTube, TV</option>
+            </select>
+          </label>
           <button id="easyRun" class="btn primary big" data-i18n="easy.run">Make film</button>
           <button id="easyOther" class="btn" data-i18n="easy.other">Choose other photos</button>
         </div>
@@ -256,7 +263,7 @@
           <h2 data-i18n="card.cal">Calibration (dark / flat)</h2>
           <div class="cal">
             <div class="calRow" data-cal="dark">
-              <label class="btn"><span data-i18n="cal.dark">Darks …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              <label class="btn"><span data-i18n="cal.dark">Darks …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.heic,.heif,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
               <label><input type="checkbox" data-cal-use="dark" disabled /> <span data-i18n="cal.apply">apply</span></label>
               <label><input type="checkbox" id="calScale" checked /> <span data-i18n="cal.scale">scale to exposure</span></label>
               <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
@@ -264,14 +271,14 @@
               <small class="calInfo"></small>
             </div>
             <div class="calRow" data-cal="flat">
-              <label class="btn"><span data-i18n="cal.flat">Flats …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              <label class="btn"><span data-i18n="cal.flat">Flats …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.heic,.heif,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
               <label><input type="checkbox" data-cal-use="flat" disabled /> <span data-i18n="cal.apply">apply</span></label>
               <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
               <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
               <small class="calInfo"></small>
             </div>
             <div class="calRow" data-cal="flatDark">
-              <label class="btn"><span data-i18n="cal.flatDark">Flat darks / bias …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
+              <label class="btn"><span data-i18n="cal.flatDark">Flat darks / bias …</span><input type="file" accept=".ser,.avi,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.heic,.heif,.fits,.fit,.fts,.fz,.nef,.nrw,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw" multiple hidden /></label>
               <button class="btn icon" data-cal-save hidden title="Save master" data-i18n-title="cal.save" aria-label="Save master">💾</button>
               <button class="btn icon" data-cal-clear hidden title="Remove" data-i18n-title="cal.remove" aria-label="Remove">✕</button>
               <small class="calInfo"></small>

@@ -1,5 +1,6 @@
 // Gemeinsame Schnittstelle für Eingaben: SER-Video oder Serie von Einzelbildern (JPG/PNG/TIFF …).
 import { exifTimeMs, readExifBlob, type ExifInfo } from "./exif";
+import { isHeif, readHeif } from "./heif";
 import { SerColor, SerReader, type Frame } from "./ser";
 import { cropFrame } from "./image";
 import { decodeFitsFrame, FITS_EXT, fitsBaseName, fitsExif, fitsFrameCount, fitsNum, fitsStr, fitsTimeMs, readFitsHeader, readFitsLayout, type FitsImageHdu } from "./fits";
@@ -137,17 +138,22 @@ export class ImageSequenceSource implements FrameSource {
       allTimed && a.timeMs !== b.timeMs ? a.timeMs! - b.timeMs! : a.name.localeCompare(b.name, undefined, { numeric: true }),
     );
     // Bildgrösse vom ersten lesbaren Bild übernehmen – mit mainCamera vom grössten (Handys speichern Ausschnitte
-    // nach dem Zoomen kleiner; ein grösseres Bild würde sonst beschnitten)
+    // nach dem Zoomen kleiner; ein grösseres Bild würde sonst beschnitten). Hoch- und Querformat gemischt: Das
+    // Bildfeld umfasst beide, damit keine Sonne am Rand abgeschnitten wird.
     let order = entries;
+    let maxW = 0, maxH = 0;
     if (opts.mainCamera) {
-      const area = await Promise.all(entries.map(async (e) => { const s = e.raw ? null : await jpegSize(e.file); return s ? s.width * s.height : 0; }));
+      const sizes = await Promise.all(entries.map((e) => (e.raw ? null : imageSize(e.file, e.exif))));
+      const area = sizes.map((s) => (s ? s.width * s.height : 0));
       const k = area.indexOf(Math.max(...area));
       if (k > 0) order = [entries[k], ...entries.filter((_, i) => i !== k)];
+      for (const s of sizes) if (s) { maxW = Math.max(maxW, s.width); maxH = Math.max(maxH, s.height); }
     }
     for (const e of order) {
       try {
         const first = await decode(e.file, e.raw);
-        const src = new ImageSequenceSource(entries, first.width, first.height, decode, first);
+        const fit = !first.frame;
+        const src = new ImageSequenceSource(entries, fit ? Math.max(first.width, maxW) : first.width, fit ? Math.max(first.height, maxH) : first.height, decode, first);
         src.skipped = skipped;
         src.padBackground = !!opts.mainCamera;
         return src;
@@ -397,6 +403,19 @@ export function sameClock(entries: { exif: ExifInfo; timeMs: number | null }[]):
     e.exif = { ...e.exif, offsetTimeOriginal: undefined };
     e.timeMs = exifTimeMs(e.exif);
   }
+}
+
+/**
+ * Bildgrösse so, wie das Bild gezeigt wird (Hochformat-Fotos sind gedreht gespeichert), ohne zu dekodieren:
+ * JPEG aus dem Kopf und der EXIF-Ausrichtung, HEIC aus dem Aufbau der Datei – oder null.
+ */
+export async function imageSize(file: Blob, exif?: ExifInfo): Promise<{ width: number; height: number } | null> {
+  if (isHeif(new Uint8Array(await file.slice(0, 64).arrayBuffer()))) {
+    const l = await readHeif(file);
+    return l ? { width: l.displayWidth, height: l.displayHeight } : null;
+  }
+  const s = await jpegSize(file);
+  return s && (exif?.orientation ?? 1) >= 5 ? { width: s.height, height: s.width } : s;
 }
 
 /** Bildgrösse einer JPEG-Datei aus dem Kopf (SOF-Marke), ohne zu dekodieren – oder null */

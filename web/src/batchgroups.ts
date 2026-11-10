@@ -16,7 +16,7 @@ export interface BatchItem<F = File> {
 }
 
 export const VIDEO_RE = /\.(ser|avi|mp4|m4v|mov|mkv|webm)$/i;
-export const IMAGE_RE = /\.(jpe?g|png|tiff?|webp|bmp|fits?|fts|fz|nef|nrw|cr2|cr3|arw|dng|raf|orf|rw2|pef|srw)$/i;
+export const IMAGE_RE = /\.(jpe?g|png|tiff?|webp|bmp|hei[cf]|fits?|fts|fz|nef|nrw|cr2|cr3|arw|dng|raf|orf|rw2|pef|srw)$/i;
 
 const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 const baseOf = (p: string) => p.slice(p.lastIndexOf("/") + 1);

@@ -1,0 +1,215 @@
+# Baut die Desktop-App aus dem öffentlichen Quellcode: Windows (Hauptplattform), macOS und Linux (experimentell).
+#
+# Windows in zwei Stufen, damit App und Installer später signiert werden können:
+#   1. astrotool.exe bauen (ohne Installer)       – später: signieren
+#   2. Installer aus der (signierten) exe packen  – später: signieren
+#
+# Ergebnis als Artefakte:
+#   Astrotool_<version>_x64-setup.exe, Astrotool_<version>_portable.exe
+#   Astrotool_<version>_macos_universal.dmg
+#   Astrotool_<version>_linux_amd64.AppImage, Astrotool_<version>_linux_amd64.deb
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\target
+    defaults:
+      run:
+        working-directory: web
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc -V
+
+      - name: Abhängigkeiten
+        run: npm ci
+
+      - name: Einheitstests
+        run: npm test
+
+      - name: Version lesen
+        id: ver
+        run: |
+          $v = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: App bauen (ohne Installer)
+        run: npm run app:build -- --no-bundle
+
+      # Stufe 1 der Signatur kommt hierhin: target\release\astrotool.exe
+
+      # --no-binary-patching: sonst schreibt Tauri die Paketart in die fertige exe und
+      # macht deren Signatur ungültig (nur für den Updater nötig, den Astrotool nicht nutzt)
+      - name: Installer packen
+        run: node scripts/tauri.mjs bundle --bundles nsis --no-binary-patching
+
+      # Stufe 2 der Signatur kommt hierhin: der Installer
+
+      - name: Dateien bereitstellen
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $out = Join-Path $env:GITHUB_WORKSPACE "out"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item "$env:CARGO_TARGET_DIR\release\astrotool.exe" "$out\Astrotool_${v}_portable.exe"
+          Copy-Item "$env:CARGO_TARGET_DIR\release\bundle\nsis\Astrotool_${v}_x64-setup.exe" "$out\Astrotool_${v}_x64-setup.exe"
+          Get-ChildItem $out | Format-Table Name, Length
+          Get-FileHash "$out\*.exe" -Algorithm SHA256 | Format-Table Hash, Path
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Astrotool_${{ steps.ver.outputs.version }}_windows
+          path: out/*.exe
+          if-no-files-found: error
+
+  # Experimentell: gebaut und kurz gestartet, aber nicht auf echten Geräten geprüft.
+  # Nicht bei Apple beglaubigt – macOS fragt beim ersten Start nach (Systemeinstellungen → Datenschutz & Sicherheit).
+  macos:
+    runs-on: macos-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rust (stable, Apple Silicon und Intel)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustc -V
+
+      - name: Abhängigkeiten
+        run: npm ci
+
+      - name: Einheitstests
+        run: npm test
+
+      - name: Version lesen
+        id: ver
+        run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      # signingIdentity "-": ohne Entwicklerkonto nur lokal signiert – sonst meldet macOS die App als "beschädigt"
+      - name: App bauen (eine Datei für Apple Silicon und Intel)
+        run: |
+          cat > "$RUNNER_TEMP/mac.json" <<'JSON'
+          { "bundle": { "macOS": { "signingIdentity": "-" } } }
+          JSON
+          npm run app:build -- --target universal-apple-darwin --bundles app,dmg --config "$RUNNER_TEMP/mac.json"
+
+      - name: Startprobe
+        run: |
+          APP="$CARGO_TARGET_DIR/universal-apple-darwin/release/bundle/macos/Astrotool.app"
+          ls -la "$APP/Contents/MacOS"
+          file "$APP/Contents/MacOS/"*
+          codesign -dv "$APP" 2>&1 | head -5 || true
+          "$APP/Contents/MacOS/astrotool" > "$RUNNER_TEMP/app.log" 2>&1 &
+          PID=$!
+          sleep 20
+          if kill -0 $PID 2>/dev/null; then echo "App läuft nach 20 s"; kill $PID; else echo "App hat sich beendet:"; cat "$RUNNER_TEMP/app.log"; exit 1; fi
+
+      - name: Dateien bereitstellen
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp "$CARGO_TARGET_DIR"/universal-apple-darwin/release/bundle/dmg/*.dmg "$GITHUB_WORKSPACE/out/Astrotool_${v}_macos_universal.dmg"
+          ls -la "$GITHUB_WORKSPACE/out"
+          shasum -a 256 "$GITHUB_WORKSPACE"/out/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Astrotool_${{ steps.ver.outputs.version }}_macos
+          path: out/*
+          if-no-files-found: error
+
+  # Experimentell: gebaut und kurz gestartet (virtueller Bildschirm), aber nicht auf echten Geräten geprüft.
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Systempakete (WebKitGTK)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc -V
+
+      - name: Abhängigkeiten
+        run: npm ci
+
+      - name: Einheitstests
+        run: npm test
+
+      - name: Version lesen
+        id: ver
+        run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: App bauen (AppImage und deb)
+        run: npm run app:build -- --bundles appimage,deb
+
+      - name: Startprobe
+        run: |
+          export WEBKIT_DISABLE_DMABUF_RENDERER=1
+          xvfb-run -a "$CARGO_TARGET_DIR/release/astrotool" > "$RUNNER_TEMP/app.log" 2>&1 &
+          PID=$!
+          sleep 20
+          if kill -0 $PID 2>/dev/null; then echo "App läuft nach 20 s"; kill $PID; else echo "App hat sich beendet:"; cat "$RUNNER_TEMP/app.log"; exit 1; fi
+
+      - name: Dateien bereitstellen
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp "$CARGO_TARGET_DIR"/release/bundle/appimage/*.AppImage "$GITHUB_WORKSPACE/out/Astrotool_${v}_linux_amd64.AppImage"
+          cp "$CARGO_TARGET_DIR"/release/bundle/deb/*.deb "$GITHUB_WORKSPACE/out/Astrotool_${v}_linux_amd64.deb"
+          ls -la "$GITHUB_WORKSPACE/out"
+          sha256sum "$GITHUB_WORKSPACE"/out/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Astrotool_${{ steps.ver.outputs.version }}_linux
+          path: out/*
+          if-no-files-found: error

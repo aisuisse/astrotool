@@ -10,6 +10,8 @@ import { RAW_EXT, rawPreview } from "./engine/raw";
 import { decodeFits, FITS_EXT, fitsBaseName, isFits } from "./engine/fits";
 import { decodeRawData, rawUnsupported, whiteBalanceFrom } from "./engine/rawdata";
 import { MediaVideoSource } from "./video";
+import { isHeif } from "./engine/heif";
+import { decodeHeif } from "./heif-decode";
 import { ZipWriter } from "./engine/zip";
 import { calibratedSource, decodeMaster, encodeMaster, masterStats, MasterBuilder, type Calibration, type Master } from "./engine/calibrate";
 import { FileSink, MemorySink, type ByteSink, type WritableFile } from "./engine/sink";
@@ -215,7 +217,7 @@ async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = 
     name = fitsBaseName(files[0].name);
     dec.state.format = "FITS";
   } else {
-    const images = files.filter((f) => /\.(jpe?g|png|tiff?|webp|bmp)$/i.test(f.name) || RAW_EXT.test(f.name) || FITS_EXT.test(f.name));
+    const images = files.filter((f) => /\.(jpe?g|png|tiff?|webp|bmp|hei[cf])$/i.test(f.name) || RAW_EXT.test(f.name) || FITS_EXT.test(f.name));
     if (!images.length) throw new Error(msg("unsupportedFiles"));
     src = await ImageSequenceSource.open(images.map((f) => ({ file: f, name: f.name, raw: RAW_EXT.test(f.name) })), dec.decode, { mainCamera });
     name = `${src.frameName(0)}-${src.frameName(src.frameCount - 1)}`;
@@ -370,6 +372,23 @@ function makeDecoder(mode: "raw" | "preview") {
 }
 
 const decodeImage: ImageDecoder = async (blob) => {
+  // HEIC (iPhone): Das liest der Browser nicht selbst – Kacheln mit dem HEVC-Dekoder des Systems dekodieren
+  let heicError: unknown = null;
+  if (isHeif(new Uint8Array(await blob.slice(0, 64).arrayBuffer()))) {
+    try {
+      return await decodeHeif(blob);
+    } catch (e) {
+      heicError = e; // macOS (WebKit) liest HEIC selbst – unten versuchen, sonst diese Meldung
+    }
+  }
+  if (heicError) {
+    try {
+      const b = await createImageBitmap(blob);
+      b.close();
+    } catch {
+      throw heicError;
+    }
+  }
   const bmp = await createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
   const c = new OffscreenCanvas(bmp.width, bmp.height);
   const g = c.getContext("2d", { willReadFrequently: true })!;

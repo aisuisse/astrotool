@@ -1139,9 +1139,11 @@ let lastEasy: Extract<FromWorker, { type: "done" }> | null = null;
 
 /** Einstellungen des Einfach-Modus: Finsternis-Vorgabe, Ausschnitt nach Sonnengrösse, Verwackeltes verwerfen */
 function easySettings(title: string): { options: ProcessOptions; timelapse: TimelapseOptions; montage: MontageOptions } {
+  const shape = $<HTMLSelectElement>("easyShape").value as NonNullable<TimelapseOptions["shape"]>;
+  try { localStorage.setItem("astrotool-easy-shape", shape); } catch { /* egal */ }
   return {
     options: { ...structuredClone(defaultOptions), ...presets.eclipse, cropAuto: true, rejectBlurred: true, strictSun: true, matchSize: true },
-    timelapse: { ...structuredClone(defaultTimelapse), enabled: true, format: "mp4-h264", timing: "real", seconds: 24, holdLastSeconds: 2.5, width: 1080, upscale: true, showTime: true, title },
+    timelapse: { ...structuredClone(defaultTimelapse), enabled: true, format: "mp4-h264", timing: "real", seconds: 24, holdLastSeconds: 2.5, width: 1080, upscale: true, showTime: true, title, shape },
     montage: { ...structuredClone(defaultMontage), enabled: true, title },
   };
 }
@@ -1299,6 +1301,10 @@ function renderEasyDone(m: Extract<FromWorker, { type: "done" }>) {
 }
 
 try { if (localStorage.getItem("astrotool-ui") === "easy") setUi(true); } catch { /* egal */ }
+try {
+  const s = localStorage.getItem("astrotool-easy-shape");
+  if (s === "portrait" || s === "landscape") $<HTMLSelectElement>("easyShape").value = s;
+} catch { /* egal */ }
 
 // ---------- Nachtmodus ----------
 const night = $("night");
