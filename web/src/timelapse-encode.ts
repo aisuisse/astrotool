@@ -4,7 +4,7 @@ import { GIFEncoder, applyPalette, quantize } from "gifenc";
 import type { Frame } from "./engine/ser";
 import { msg } from "./i18n";
 import { setMp4CreationTime } from "./engine/mp4time";
-import { buildSequence, constantRateCounts, filmLayout, isMp4, ticksToClock, videoFrameRate, type TimelapseOptions } from "./engine/timelapse";
+import { buildSequence, constantRateCounts, filmLayout, isMp4, movieSeconds, ticksToClock, videoFrameRate, type TimelapseOptions } from "./engine/timelapse";
 import { blendFrames, defaultMovie, fillMoonTrack, planMovie, synthFrame, type MovieFrame, type MovieStep, type Rgba } from "./engine/eclipsemovie";
 
 /** Ein konkreter Encoder-Plan. Die Codec-Strings legen Profil und Level fest, die Handys sicher abspielen. */
@@ -139,7 +139,7 @@ export class TimelapseRecorder {
       movie = this.frames.map((f, i) => ({ t: Number(stamps[i] - s0) / 1e7, ...structuredClone(f.meta ?? { kind: "none" as const }) }));
       fillMoonTrack(movie);
       const steps = planMovie(movie, {
-        ...defaultMovie, seconds: o.seconds, holdEnd: o.holdLastSeconds,
+        ...defaultMovie, seconds: movieSeconds(this.frames.length, o), holdEnd: o.holdLastSeconds,
       });
       for (const s of steps) {
         const last = runs[runs.length - 1];

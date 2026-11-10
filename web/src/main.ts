@@ -4,7 +4,7 @@ import { MIN_ANCHOR } from "./engine/surface";
 import { applyPof, parsePof } from "./engine/pof";
 import { defaultTimelapse, type TimelapseOptions } from "./engine/timelapse";
 import { defaultMontage, type MontageOptions } from "./engine/montage";
-import { isLang, t as translate, tr as translateMsg, type I18nKey, type Lang } from "./i18n";
+import { dictionaries, isLang, t as translate, tr as translateMsg, type I18nKey, type Lang } from "./i18n";
 import { initTools, isDesktopApp } from "./tools";
 import { initPlayer } from "./player";
 import { filesOf, forgetRecent, recentList, recentSupported, rememberRecent, type RecentEntry } from "./recent";
@@ -771,7 +771,7 @@ function renderInfo(i: FileInfo) {
     [L("info.bitDepth"), `${i.bitDepth} bit`],
   ];
   if (i.fps) rows.push([L("info.frameRate"), `${i.fps.toFixed(1)} fps`]);
-  const ts = (s: string) => s.replace("T", " ").slice(0, 19);
+  const ts = (s: string) => localIso(s, i.clockShiftMs).replace("T", " ").slice(0, 19);
   if (i.kind === "images" && i.firstTimestamp && i.lastTimestamp) {
     rows.push([L("info.captureCamera"), `${ts(i.firstTimestamp)} – ${ts(i.lastTimestamp).slice(11)}`]);
   } else if (i.firstTimestamp) rows.push([L("info.captureUtc"), ts(i.firstTimestamp)]);
@@ -1129,6 +1129,12 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
   }
 };
 
+/** Zeitstempel (ISO, UT) um die Zeitzone der Aufnahme verschoben – Handys speichern sie mit */
+function localIso(s: string, shiftMs = 0): string {
+  const d = shiftMs ? new Date(Date.parse(s.endsWith("Z") ? s : s + "Z") + shiftMs) : null;
+  return d && !isNaN(d.getTime()) ? d.toISOString() : s;
+}
+
 // ---------- Einfach-Modus: Finsternis-Film mit einem Klick ----------
 /** Einfach-Modus aktiv? (gemerkt pro Browser) */
 let uiEasy = false;
@@ -1136,14 +1142,34 @@ let uiEasy = false;
 let easyRunning = false;
 let easyUrls: string[] = [];
 let lastEasy: Extract<FromWorker, { type: "done" }> | null = null;
+/** Was die Serie zeigt: Sonnenfinsternis oder Mondfinsternis */
+type EasyKind = "solar" | "lunar";
+let easyKind: EasyKind = "solar";
+/** Text zur Art der Serie: "easy.title" → "easy.title.lunar", wenn es diese Fassung gibt */
+const EK = (k: string) => ((easyKind !== "solar" && `${k}.${easyKind}` in dictionaries.en ? `${k}.${easyKind}` : k) as I18nKey);
+
+function setEasyKind(k: EasyKind) {
+  easyKind = k;
+  document.querySelectorAll<HTMLButtonElement>("#easyKind [data-kind]").forEach((b) => b.classList.toggle("on", b.dataset.kind === k));
+  $("easyH1").dataset.i18n = EK("easy.title");
+  $("easyLead").dataset.i18n = EK("easy.lead");
+  $("easyTitleIn").dataset.i18nPlaceholder = EK("tl.titlePlaceholder");
+  $("easyH1").textContent = L(EK("easy.title"));
+  $("easyLead").textContent = L(EK("easy.lead"));
+  $<HTMLInputElement>("easyTitleIn").placeholder = L(EK("tl.titlePlaceholder"));
+  try { localStorage.setItem("astrotool-easy-kind", k); } catch { /* egal */ }
+  renderEasy();
+}
+document.querySelectorAll<HTMLButtonElement>("#easyKind [data-kind]").forEach((b) => b.addEventListener("click", () => { if (!busy) setEasyKind(b.dataset.kind as EasyKind); }));
 
 /** Einstellungen des Einfach-Modus: Finsternis-Vorgabe, Ausschnitt nach Sonnengrösse, Verwackeltes verwerfen */
 function easySettings(title: string): { options: ProcessOptions; timelapse: TimelapseOptions; montage: MontageOptions } {
   const shape = $<HTMLSelectElement>("easyShape").value as NonNullable<TimelapseOptions["shape"]>;
   try { localStorage.setItem("astrotool-easy-shape", shape); } catch { /* egal */ }
   return {
-    options: { ...structuredClone(defaultOptions), ...presets.eclipse, cropAuto: true, rejectBlurred: true, strictSun: true, matchSize: true },
-    timelapse: { ...structuredClone(defaultTimelapse), enabled: true, format: "mp4-h264", timing: "real", seconds: 24, holdLastSeconds: 2.5, width: 1080, upscale: true, showTime: true, title, shape },
+    // Mondfinsternis: der Mond selbst ist die Scheibe – keine Belichtungsreihen der Korona
+    options: { ...structuredClone(defaultOptions), ...presets.eclipse, cropAuto: true, rejectBlurred: true, strictSun: true, matchSize: true, ...(easyKind === "lunar" ? { subject: "moon" as const, hdr: false } : {}) },
+    timelapse: { ...structuredClone(defaultTimelapse), enabled: true, format: "mp4-h264", timing: "real", seconds: 24, secondsPerPhoto: 1.5, holdLastSeconds: 2.5, width: 1080, upscale: true, showTime: true, title, shape },
     montage: { ...structuredClone(defaultMontage), enabled: true, title },
   };
 }
@@ -1191,7 +1217,7 @@ function renderEasy() {
   if (info && !running) {
     const locale = lang === "de" ? "de-CH" : "en-GB";
     const rows: [string, string][] = [[L("easy.photos"), info.frameCount.toLocaleString(locale)]];
-    const ts = (s: string) => s.replace("T", " ").slice(0, 16);
+    const ts = (s: string) => localIso(s, info!.clockShiftMs).replace("T", " ").slice(0, 16);
     if (info.firstTimestamp && info.lastTimestamp) rows.push([L("easy.when"), `${ts(info.firstTimestamp)} – ${ts(info.lastTimestamp).slice(11)}`]);
     if (info.instrument) rows.push([L("info.camera"), info.instrument + (info.telescope ? ` · ${info.telescope}` : "")]);
     const skipped = (info.skipped?.length ?? 0) + Math.max(0, easyPickedCount - info.frameCount - (info.skipped?.length ?? 0));
@@ -1238,14 +1264,14 @@ $("easyRun").addEventListener("click", () => {
 $("easyCancel").addEventListener("click", () => send({ type: "cancel" }));
 
 function easyProgress(m: Extract<FromWorker, { type: "progress" }>) {
-  $("easyStep").textContent = L(`easy.step.${m.phase}` as I18nKey);
+  $("easyStep").textContent = L(EK(`easy.step.${m.phase}`));
   $("easyBar").style.width = `${m.total ? (m.done / m.total) * 100 : 0}%`;
   $("easyCount").textContent = m.phase === "video" ? `${Math.round((m.done / Math.max(1, m.total)) * 100)} %` : `${m.done} / ${m.total}`;
 }
 
 /** Gründe für aussortierte Bilder in einfache Gruppen */
 function easyReason(code: string): I18nKey {
-  const c = code.replace(/^@/, "").split("|")[0];
+  const c = code.replace(/^@/, "").split("|")[0].replace(/(.)Moon$/, "$1");
   if (c === "bloom" || c === "overexposed") return "easy.why.overexposed";
   if (c === "blurred") return "easy.why.blurred";
   if (c === "radiusOutlier" || c === "nearTotality" || c === "totalityNoMoon") return "easy.why.unclear";
@@ -1260,7 +1286,7 @@ function easyDone(m: Extract<FromWorker, { type: "done" }>) {
   for (const u of easyUrls) URL.revokeObjectURL(u);
   easyUrls = [];
   lastEasy = m;
-  if (!m.timelapse) showEasyError(m.timelapseError ?? (m.written ? L("easy.noFilm") : L("easy.nothingUsable")));
+  if (!m.timelapse) showEasyError(m.timelapseError ?? (m.written ? L("easy.noFilm") : L(EK("easy.nothingUsable"))));
   renderEasy();
 }
 
@@ -1288,10 +1314,11 @@ function renderEasyDone(m: Extract<FromWorker, { type: "done" }>) {
       <button class="btn" id="easyAgain">${escapeHtml(L("easy.again"))}</button></div>
       <strong>${escapeHtml(L("easy.filmInfo", tl.seconds.toFixed(0), used, total))}</strong>`);
     if (tl.synthesized) parts.push(`<small>${escapeHtml(L("easy.synth", tl.synthesized))}</small>`);
+    else if (tl.blended) parts.push(`<small>${escapeHtml(L("easy.blend", tl.blended))}</small>`);
   } else parts.push(`<div class="row"><button class="btn" id="easyAgain">${escapeHtml(L("easy.again"))}</button></div>`);
   if (groups.size || other) {
-    const items = [...groups].map(([k, v]) => `<li>${escapeHtml(L(k, v.length))}</li>`);
-    if (other) items.push(`<li>${escapeHtml(L("easy.why.otherCamera", other))}</li>`);
+    const items = [...groups].map(([k, v]) => `<li>${escapeHtml(L(EK(k), v.length))}</li>`);
+    if (other) items.push(`<li>${escapeHtml(L(EK("easy.why.otherCamera"), other))}</li>`);
     parts.push(`<div><small>${escapeHtml(L("easy.sortedOut"))}</small><ul>${items.join("")}</ul></div>`);
     parts.push(`<details><summary>${escapeHtml(L("easy.details"))}</summary><small>${[...groups.values()].flat().map(escapeHtml).join("<br>")}${other ? "<br>" + info!.skipped!.map((s) => escapeHtml(`${s.name}: ${s.camera || L("easy.unknownCamera")}`)).join("<br>") : ""}</small></details>`);
   }
@@ -1300,6 +1327,7 @@ function renderEasyDone(m: Extract<FromWorker, { type: "done" }>) {
   $("easyAgain")?.addEventListener("click", () => resetEasy());
 }
 
+try { if (localStorage.getItem("astrotool-easy-kind") === "lunar") setEasyKind("lunar"); } catch { /* egal */ }
 try { if (localStorage.getItem("astrotool-ui") === "easy") setUi(true); } catch { /* egal */ }
 try {
   const s = localStorage.getItem("astrotool-easy-shape");

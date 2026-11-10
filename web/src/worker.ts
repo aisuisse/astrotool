@@ -71,6 +71,8 @@ export interface FileInfo {
   telescope: string;
   hasTimestamps: boolean;
   firstTimestamp: string | null;
+  /** Bildserie mit Zeitzone (Handy): Zeitstempel sind UT; so viele ms dazu ergeben die Ortszeit der Aufnahme */
+  clockShiftMs?: number;
   lastTimestamp: string | null;
   fps: number | null;
   /** Aufnahmezeit (ms, UT) des ersten und letzten Bildes für WinJUPOS-Namen – auch aus Dateinamen; null = unbekannt */
@@ -528,6 +530,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
           color: colorName(source.colorId), colorId: source.colorId,
           observer: source.meta.observer ?? "", instrument: source.meta.instrument ?? "", telescope: source.meta.telescope ?? "",
           hasTimestamps: !!ts, firstTimestamp: ts ? ticksToIso(ts[0]) : null, lastTimestamp: ts ? ticksToIso(ts[ts.length - 1]) : null, fps,
+          clockShiftMs: clockShift(source),
           wjStart: frameTimes ? frameTimes[0] : null, wjEnd: frameTimes ? frameTimes[frameTimes.length - 1] : null,
           raw: !!dec.state.format && dec.state.format !== "FITS", rawFormat: dec.state.format, rawHint: dec.state.hint,
           skipped: source instanceof ImageSequenceSource ? source.skipped : undefined,

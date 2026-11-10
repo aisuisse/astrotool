@@ -98,6 +98,12 @@ export interface ProcessOptions extends TransformOptions, WinJuposOptions {
    * Verworfen werden dann nur Bilder, deren Sonnengrösse zu keinem Nachbarbild passt (überstrahlt, Wolken).
    */
   matchSize: boolean;
+  /**
+   * Was die Scheibe ist (Mittelpunkt "disc"). "sun": Sonne, auch mit Mond davor und Totalität (Korona).
+   * "moon": der Mond selbst – Mondfinsternis oder Mondphasen. Gesucht wird nur der Mondrand; den Erdschatten
+   * begrenzt kein scharfer Rand, und eine Totalität mit Korona gibt es nicht.
+   */
+  subject: "sun" | "moon";
 }
 
 export const defaultOptions: ProcessOptions = {
@@ -132,6 +138,7 @@ export const defaultOptions: ProcessOptions = {
   cropAuto: false,
   strictSun: false,
   matchSize: false,
+  subject: "sun",
   mono: false,
   flipH: false,
   flipV: false,
@@ -288,21 +295,22 @@ function outSize(src: FrameSource, o: ProcessOptions): [number, number] {
 export function detect(lum: Lum, o: ProcessOptions): FrameDetection {
   const det: FrameDetection = detectObject(lum, { threshold: o.threshold ?? undefined });
   if (o.centreMode === "disc" && det.found) {
-    let [fit, kind] = limbFit(lum, o);
+    const lunar = o.subject === "moon";
+    let [fit, kind] = lunar ? ([fitSunDisc(lum, { threshold: o.threshold ?? undefined }), "sun"] as [DiscFit, "sun" | "moon"]) : limbFit(lum, o);
     // Einfach-Modus: überstrahlte Sonne im grossen Lichtschein (Handy ohne Filter, herangezoomt) – die Schwelle bei
     // halber Höhe liegt dann im Lichtschein, der „Rand“ wäre der Rand des Scheins. Gemessen wird am gesättigten Kern.
-    if (o.strictSun && fit.found && kind === "sun" && det.maxValue >= 0.98 && saturatedShare(lum, fit) < 0.3) {
+    if (!lunar && o.strictSun && fit.found && kind === "sun" && det.maxValue >= 0.98 && saturatedShare(lum, fit) < 0.3) {
       const core = fitSunDisc(lum, { threshold: 0.9 });
       if (core.found && core.r < 0.7 * fit.r) fit = core;
     }
     if (fit.found) {
       det.disc = { cx: fit.cx, cy: fit.cy, r: fit.r, visibleLimb: fit.visibleLimb, rms: fit.rms, kind };
       det.size = Math.round(2 * fit.r);
-      if (kind === "sun" && o.totalitySunCentre) {
+      if (kind === "sun" && o.totalitySunCentre && !lunar) {
         const m = fitMoonInPartial(lum, fit, fit.threshold);
         if (m) det.disc.moon = { cx: m.cx, cy: m.cy, r: m.r };
       }
-      if (kind === "sun" && !det.disc.moon) {
+      if (kind === "sun" && !det.disc.moon && !lunar) {
         const m = fitMoonInPartial(lum, fit, fit.threshold, { maxRms: Math.max(4, 0.025 * fit.r) });
         if (m) det.disc.moonLoose = { cx: m.cx, cy: m.cy, r: m.r };
       }
@@ -439,7 +447,7 @@ export function judge(index: number, det: FrameDetection, o: ProcessOptions): Fr
     // oft falsch (echte Serie: r 124 statt 236) – lieber verwerfen als die Sonne springen lassen
     else if (o.centreMode === "disc" && o.centre && det.disc && det.maxValue < 0.08 && det.disc.rms > 2)
       Object.assign(r, { accepted: false, reason: msg("tooDark") });
-    else if (o.strictSun && det.disc?.plausible === false) Object.assign(r, { accepted: false, reason: msg("noSun") });
+    else if (o.strictSun && det.disc?.plausible === false) Object.assign(r, { accepted: false, reason: msg(o.subject === "moon" ? "noMoon" : "noSun") });
   }
   // Überbelichtung: Anteil gesättigter Pixel an der Objektfläche. Totalität ausgenommen (Korona gewollt gesättigt).
   if (r.accepted && o.checkObject && o.rejectOverexposed && det.disc?.kind !== "moon") {
@@ -490,11 +498,14 @@ export function rejectRadiusOutliers(results: FrameResult[], window = 4, toleran
  * der nächsten Bilder passen (± tolerance) – eine Zoomstufe hat meist mehrere Fotos. Ausreisser – überstrahlt, Wolken,
  * ein falscher Rand – passen zu keinem oder höchstens einem (echte Serie: zwei überstrahlte Bilder mit 4 % Unterschied).
  */
-export function rejectIsolatedRadii(results: FrameResult[], window = 12, tolerance = 0.06, support = 2): void {
+export function rejectIsolatedRadii(results: FrameResult[], window = 12, tolerance = 0.06, support = 2, subject: "sun" | "moon" = "sun"): void {
   const withDisc = results.filter((r) => r.accepted && r.det.disc);
   if (withDisc.length < 5) return;
   const radii = withDisc.map((r) => r.det.disc!.r);
-  const bad = withDisc.map((_, i) => {
+  const bad = withDisc.map((res, i) => {
+    // Mond: Ein einzelnes Foto mit anderem Zoom bleibt, wenn der Rand sauber gemessen ist (enger Kreis, genug Rand
+    // sichtbar, nicht überstrahlt) – Handy-Serien haben oft nur ein oder zwei Fotos je Zoomstufe.
+    if (subject === "moon" && wellMeasured(res)) return false;
     let n = 0;
     for (let j = Math.max(0, i - window); j <= Math.min(withDisc.length - 1, i + window); j++)
       if (j !== i && Math.abs(radii[j] - radii[i]) <= tolerance * radii[i]) n++;
@@ -504,14 +515,21 @@ export function rejectIsolatedRadii(results: FrameResult[], window = 12, toleran
   withDisc.forEach((res, i) => {
     if (!bad[i]) return;
     res.accepted = false;
-    res.reason = radiusReason(res, radii[i], med);
+    res.reason = radiusReason(res, radii[i], med, subject);
   });
 }
 
+/** Rand eng am Kreis (Streuung höchstens 0.4 % des Radius bzw. 1.5 px), mindestens ein Fünftel sichtbar, nicht überstrahlt */
+function wellMeasured(res: FrameResult): boolean {
+  const d = res.det.disc;
+  return !!d && d.rms <= Math.max(1.5, 0.004 * d.r) && d.visibleLimb >= 0.2 && (res.det.overexposedObject ?? 0) < 0.5;
+}
+
 /** Zu grosse Scheibe und mindestens die Hälfte davon gesättigt: überstrahlt (zu lange belichtet, Filter verstellt) */
-function radiusReason(res: FrameResult, r: number, med: number): string {
+function radiusReason(res: FrameResult, r: number, med: number, subject: "sun" | "moon" = "sun"): string {
   const bloom = r > med && res.det.disc?.kind === "sun" && (res.det.overexposedObject ?? 0) >= 0.5;
-  return msg(bloom ? "bloom" : "radiusOutlier", Math.round(2 * r), Math.round(2 * med));
+  const code = bloom ? "bloom" : "radiusOutlier";
+  return msg(subject === "moon" ? (`${code}Moon` as const) : code, Math.round(2 * r), Math.round(2 * med));
 }
 
 /**
@@ -519,7 +537,7 @@ function radiusReason(res: FrameResult, r: number, med: number): string {
  * zeitlich nächsten Bilder. Verglichen wird nur innerhalb der Serie – bei überbelichteter Sonne oder Dunst ist der
  * Rand in allen Bildern breit (echte Serie ohne Sonnenfilter: 8 px), dann zählt nur, was davon abweicht.
  */
-export function rejectBlurred(results: FrameResult[], stamps: BigInt64Array | null, factor = 1.6, minExcess = 1.5, neighbours = 8): void {
+export function rejectBlurred(results: FrameResult[], stamps: BigInt64Array | null, factor = 1.6, minExcess = 1.5, neighbours = 8, subject: "sun" | "moon" = "sun"): void {
   const tOf = (r: FrameResult) => (stamps ? Number(stamps[r.index] - stamps[0]) / 1e7 : r.index);
   const withW = results.filter((r) => r.accepted && r.det.disc?.kind === "sun" && r.det.disc.limbWidth !== undefined);
   if (withW.length < 5) return;
@@ -537,7 +555,7 @@ export function rejectBlurred(results: FrameResult[], stamps: BigInt64Array | nu
     const med = ref[ref.length >> 1];
     if (w > factor * med && w > med + minExcess) {
       res.accepted = false;
-      res.reason = msg("blurred", w.toFixed(1), med.toFixed(1));
+      res.reason = msg(subject === "moon" ? "blurredMoon" : "blurred", w.toFixed(1), med.toFixed(1));
     }
   });
 }
@@ -729,9 +747,9 @@ export async function processSource(
     // zuerst die Bilder rund um die Totalität: falsche Ränder dort liegen oft dicht beisammen, bestätigen sich in
     // der Nachbarprüfung gegenseitig und verdrängen sonst die richtigen Mondrand-Bilder
     rejectSunNearTotality(results, stamps);
-    if (o.matchSize) rejectIsolatedRadii(results);
+    if (o.matchSize) rejectIsolatedRadii(results, 12, 0.06, 2, o.subject);
     else rejectRadiusOutliers(results);
-    if (o.rejectBlurred) rejectBlurred(results, stamps);
+    if (o.rejectBlurred) rejectBlurred(results, stamps, 1.6, 1.5, 8, o.subject);
     rejectSunInsideTotality(results, stamps);
     if (o.totalitySunCentre) estimateSunInTotality(results, stamps);
     if (o.matchSize) {

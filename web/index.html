@@ -44,8 +44,12 @@
 
     <main>
       <section id="easy" class="easy" hidden>
-        <h1 data-i18n="easy.title">Solar eclipse film</h1>
-        <p class="lead" data-i18n="easy.lead">Add all your photos of the eclipse. Astrotool finds the sun, sorts out unusable shots, keeps the sun in the middle and turns the series into a film for your phone.</p>
+        <div id="easyKind" class="seg easyKind" role="radiogroup" aria-label="Kind of series">
+          <button class="on" data-kind="solar" data-i18n="easy.kind.solar">Solar eclipse</button>
+          <button data-kind="lunar" data-i18n="easy.kind.lunar">Lunar eclipse</button>
+        </div>
+        <h1 id="easyH1" data-i18n="easy.title">Solar eclipse film</h1>
+        <p id="easyLead" class="lead" data-i18n="easy.lead">Add all your photos of the eclipse. Astrotool finds the sun, sorts out unusable shots, keeps the sun in the middle and turns the series into a film for your phone.</p>
         <div id="easyDrop" class="drop easyDrop">
           <div>
             <strong id="easyDropTitle" data-i18n="easy.dropTitle">Drop your photos or a folder here</strong>

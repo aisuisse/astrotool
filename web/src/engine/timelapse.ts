@@ -33,6 +33,11 @@ export interface TimelapseOptions {
   timing: "frames" | "real";
   /** "real": Länge des Films in Sekunden (ohne Halten am Anfang und Ende) */
   seconds: number;
+  /**
+   * "real": Bei wenigen Fotos kürzer – so viele Sekunden je Foto, mindestens 8 s, höchstens `seconds`
+   * (vier Fotos ergeben sonst 24 s Überblendung).
+   */
+  secondsPerPhoto?: number;
   /** Auf die Breite vergrössern, wenn die Bilder kleiner sind (für Handys: Full HD statt kleinem Ausschnitt) */
   upscale: boolean;
   /**
@@ -61,6 +66,11 @@ export const defaultTimelapse: TimelapseOptions = {
   seconds: 24,
   upscale: false,
 };
+
+/** Länge des zeittreuen Films in Sekunden (ohne Halten) für eine Zahl von Fotos */
+export function movieSeconds(photos: number, o: Pick<TimelapseOptions, "seconds" | "secondsPerPhoto">): number {
+  return o.secondsPerPhoto ? Math.min(o.seconds, Math.max(8, photos * o.secondsPerPhoto)) : o.seconds;
+}
 
 /** MP4 für WhatsApp/Google Fotos: höchstens Full HD auf der langen Seite. */
 export const MP4_MAX_LONG_SIDE = 1920;

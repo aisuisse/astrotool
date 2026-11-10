@@ -219,6 +219,8 @@ body.easy main { grid-template-columns: minmax(0, 1fr); max-width: 860px; margin
 body.easy main > .stage, body.easy main > aside, body.easy .expertOnly { display: none !important; }
 .easy { display: flex; flex-direction: column; gap: 14px; }
 .easy h1 { margin: 6px 0 0; font-size: 26px; }
+.easyKind { align-self: flex-start; }
+.easyKind button { padding: 8px 18px; white-space: nowrap; }
 .easy .lead { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
 .easyDrop { min-height: 220px; text-align: center; }
 .easyPick { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 14px 0 8px; }
