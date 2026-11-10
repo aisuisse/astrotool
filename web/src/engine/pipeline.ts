@@ -9,7 +9,7 @@ import { SerColor, SerReader, SerWriter, type Frame } from "./ser";
 import { debayer, patternFromColorId, type BayerPattern } from "./debayer";
 import { serSource, type FrameSource } from "./source";
 import { SurfaceTracker, type SurfaceBox, type SurfaceMotion } from "./surface";
-import { bayerAfterTransform, hasTransform, resize, rotatedCrop, transformFrame, transformedSize, type TransformOptions } from "./transform";
+import { bayerAfterTransform, hasTransform, resize, rotatedCrop, soften, transformFrame, transformedSize, type TransformOptions } from "./transform";
 import type { WinJuposOptions } from "./winjupos";
 import { isBayer } from "./ser";
 import { msg } from "../i18n";
@@ -345,6 +345,12 @@ export function detect(lum: Lum, o: ProcessOptions, whole?: WholeView): FrameDet
         const minSide = whole ? Math.min(whole.width, whole.height) : Math.min(lum.width, lum.height);
         // Ausnahme für die dünne Sichel kurz vor der Totalität: wenig Helles in der Sichel, daneben etwas Dunst
         det.disc.plausible = fit.r <= 0.45 * minSide && (b.share <= 0.3 || (fit.visibleLimb <= 0.45 && b.perDisc <= 0.1));
+        // Mond: Nachtaufnahmen (Menschen, Lichter, Wolken) ergeben oft einen grossen „Kreis“ durch irgendwelche
+        // Kanten – wenig Rand und grosse Streuung. Ein echter Mondrand liegt eng am Kreis oder ist weit herum
+        // sichtbar (auch weich und verrauscht in der Totalität: Streuung bis 2 % des Radius, echte Handy-Serie).
+        if (lunar)
+          det.disc.plausible &&=
+            (fit.rms <= Math.max(1.5, 0.006 * fit.r) && fit.visibleLimb >= 0.15) || (fit.rms <= Math.max(3, 0.02 * fit.r) && fit.visibleLimb >= 0.3);
       }
     }
   }
@@ -556,8 +562,8 @@ export function rejectIsolatedRadii(results: FrameResult[], window = 12, toleran
   if (withDisc.length < 5) return;
   const radii = withDisc.map((r) => r.det.disc!.r);
   const bad = withDisc.map((res, i) => {
-    // Mond: Ein einzelnes Foto mit anderem Zoom bleibt, wenn der Rand sauber gemessen ist (enger Kreis, genug Rand
-    // sichtbar, nicht überstrahlt) – Handy-Serien haben oft nur ein oder zwei Fotos je Zoomstufe.
+    // Mond: Ein einzelnes Foto mit anderem Zoom bleibt, wenn der Rand glaubhaft gemessen ist (siehe plausible in
+    // detect) und der Mond nicht überstrahlt ist – Handy-Serien haben oft nur ein oder zwei Fotos je Zoomstufe.
     if (subject === "moon" && wellMeasured(res)) return false;
     let n = 0;
     for (let j = Math.max(0, i - window); j <= Math.min(withDisc.length - 1, i + window); j++)
@@ -572,10 +578,11 @@ export function rejectIsolatedRadii(results: FrameResult[], window = 12, toleran
   });
 }
 
-/** Rand eng am Kreis (Streuung höchstens 0.4 % des Radius bzw. 1.5 px), mindestens ein Fünftel sichtbar, nicht überstrahlt */
+/** Mondrand glaubhaft (eng am Kreis oder weit herum sichtbar) und Mond nicht überstrahlt */
 function wellMeasured(res: FrameResult): boolean {
   const d = res.det.disc;
-  return !!d && d.rms <= Math.max(1.5, 0.004 * d.r) && d.visibleLimb >= 0.2 && (res.det.overexposedObject ?? 0) < 0.5;
+  if (!d || (res.det.overexposedObject ?? 0) >= 0.5) return false;
+  return d.plausible ?? ((d.rms <= Math.max(1.5, 0.006 * d.r) && d.visibleLimb >= 0.15) || (d.rms <= Math.max(3, 0.02 * d.r) && d.visibleLimb >= 0.3));
 }
 
 /** Zu grosse Scheibe und mindestens die Hälfte davon gesättigt: überstrahlt (zu lange belichtet, Filter verstellt) */
@@ -814,7 +821,8 @@ export async function processSource(
     rejectSunNearTotality(results, stamps);
     if (o.matchSize) rejectIsolatedRadii(results, 12, 0.06, 2, o.subject);
     else rejectRadiusOutliers(results);
-    if (o.rejectBlurred) rejectBlurred(results, stamps, 1.6, 1.5, 8, o.subject);
+    // Mond: In der Totalität ist der Rand weich und verrauscht (lange belichtet, Handy) – nur grobe Fälle verwerfen
+    if (o.rejectBlurred) rejectBlurred(results, stamps, o.subject === "moon" ? 2.5 : 1.6, o.subject === "moon" ? 3 : 1.5, 8, o.subject);
     rejectSunInsideTotality(results, stamps);
     if (o.totalitySunCentre) estimateSunInTotality(results, stamps);
     if (o.matchSize) {
@@ -899,7 +907,9 @@ export async function processSource(
         const [x0, y0] = cropOrigin(cx - o.offsetX / res.zoom, cy - o.offsetY / res.zoom, bw, bh, frame ? frame.colorId : src.colorId, !!frame && bayerPatternFor(o, frame) !== null);
         res.origin = [x0, y0];
         res.zoom = cw / bw;
-        const out = resize(colourise(frame ? cropFrame(frame, x0, y0, bw, bh) : await src.readRegion!(res.index, x0, y0, bw, bh), o), cw, ch);
+        let out = resize(colourise(frame ? cropFrame(frame, x0, y0, bw, bh) : await src.readRegion!(res.index, x0, y0, bw, bh), o), cw, ch);
+        // stark vergrössert (Handy, wenig herangezoomt): leicht weichzeichnen, sonst sieht man die JPEG-Kästchen
+        if (res.zoom > 2.5) out = soften(out, 0.45 * res.zoom);
         if (o.strictSun) fillOutside(out, x0, y0, res.zoom, src.width, src.height);
         await sink(finishFrame(out, o), res, written.length, ts);
       } else {

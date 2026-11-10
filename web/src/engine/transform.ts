@@ -311,6 +311,37 @@ export function resize(f: Frame, ow: number, oh: number): Frame {
 }
 
 /**
+ * Weichzeichnen (Kastenfilter, zweimal waagrecht und senkrecht – nahe an einer Glockenkurve) mit Radius in Pixel.
+ * Für stark vergrösserte Handy-Ausschnitte: Die Kästchen der JPEG-Kompression wären sonst im Film zu sehen.
+ */
+export function soften(f: Frame, radius: number): Frame {
+  const r = Math.round(radius);
+  if (r < 1) return f;
+  const { width: w, height: h, planes: p } = f;
+  const a = Float32Array.from(f.data), b = new Float32Array(a.length);
+  const pass = (src: Float32Array, dst: Float32Array, n: number, lines: number, step: number, lineStep: number) => {
+    // gleitende Summe über 2r+1 Punkte je Zeile bzw. Spalte, am Rand mit dem Randwert fortgesetzt
+    for (let l = 0; l < lines; l++)
+      for (let c = 0; c < p; c++) {
+        const base = l * lineStep + c;
+        let s = 0;
+        for (let k = -r; k <= r; k++) s += src[base + Math.min(n - 1, Math.max(0, k)) * step];
+        for (let i = 0; i < n; i++) {
+          dst[base + i * step] = s / (2 * r + 1);
+          s += src[base + Math.min(n - 1, i + r + 1) * step] - src[base + Math.max(0, i - r) * step];
+        }
+      }
+  };
+  for (let k = 0; k < 2; k++) {
+    pass(a, b, w, h, p, w * p);
+    pass(b, a, h, w, w * p, p);
+  }
+  const out = f.data instanceof Uint16Array ? new Uint16Array(a.length) : new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i++) out[i] = Math.round(a[i]);
+  return { ...f, data: out };
+}
+
+/**
  * Ausschnitt cw × ch, dessen Mitte bei (cx, cy) im Bild liegt, um angle gedreht entnommen (bilinear): Punkt v
  * relativ zur Ausschnittmitte kommt von (cx, cy) + R(angle)·v. So wird eine gemessene Drehung des Bildinhalts
  * ausgeglichen. Das Bild muss farbig oder grau sein (keine Bayer-Rohdaten).
