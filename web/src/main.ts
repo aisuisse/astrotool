@@ -1168,7 +1168,7 @@ function easySettings(title: string): { options: ProcessOptions; timelapse: Time
   try { localStorage.setItem("astrotool-easy-shape", shape); } catch { /* egal */ }
   return {
     // Mondfinsternis: der Mond selbst ist die Scheibe – keine Belichtungsreihen der Korona
-    options: { ...structuredClone(defaultOptions), ...presets.eclipse, cropAuto: true, rejectBlurred: true, strictSun: true, matchSize: true, ...(easyKind === "lunar" ? { subject: "moon" as const, hdr: false } : {}) },
+    options: { ...structuredClone(defaultOptions), ...presets.eclipse, cropAuto: true, rejectBlurred: true, strictSun: true, matchSize: true, fastAnalyse: true, ...(easyKind === "lunar" ? { subject: "moon" as const, hdr: false } : {}) },
     timelapse: { ...structuredClone(defaultTimelapse), enabled: true, format: "mp4-h264", timing: "real", seconds: 24, secondsPerPhoto: 1.5, holdLastSeconds: 2.5, width: 1080, upscale: true, showTime: true, title, shape },
     montage: { ...structuredClone(defaultMontage), enabled: true, title },
   };

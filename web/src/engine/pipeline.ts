@@ -1,7 +1,7 @@
 // Verarbeitungsablauf: erkennen → prüfen → bewerten → sortieren → zuschneiden → ausgeben.
 // Zwei Durchläufe, damit auch sehr lange Videos nicht komplett im Speicher liegen müssen.
 import { cropFrame, cropLum, cropOrigin, detectObject, toLum, type Detection, type Lum } from "./image";
-import { fitSunDisc, percentile, sample, type DiscFit } from "./limb";
+import { backgroundLevel, fitSunDisc, percentile, sample, type DiscFit } from "./limb";
 import { bracketGroups, fitMoonDisc, fitMoonInPartial, mergeHdr, type BracketFrame } from "./totality";
 import { quality, type QualityOptions, defaultQuality } from "./quality";
 import { limbWidth } from "./eclipsemovie";
@@ -104,6 +104,13 @@ export interface ProcessOptions extends TransformOptions, WinJuposOptions {
    * begrenzt kein scharfer Rand, und eine Totalität mit Korona gibt es nicht.
    */
   subject: "sun" | "moon";
+  /**
+   * Schnelle Analyse für Fotoserien (Mittelpunkt "disc", ohne Schärfe-Auswahl): Das Objekt wird zuerst in einer
+   * verkleinerten Ansicht gesucht, danach wird nur der Ausschnitt um das Objekt in voller Auflösung gelesen und
+   * vermessen. Spart bei grossen Fotos den grössten Teil der Zeit und des Speichers. Braucht eine Quelle mit
+   * Teilansichten (hasParts); sonst wie gewohnt.
+   */
+  fastAnalyse: boolean;
 }
 
 export const defaultOptions: ProcessOptions = {
@@ -139,6 +146,7 @@ export const defaultOptions: ProcessOptions = {
   strictSun: false,
   matchSize: false,
   subject: "sun",
+  fastAnalyse: false,
   mono: false,
   flipH: false,
   flipV: false,
@@ -292,11 +300,23 @@ function outSize(src: FrameSource, o: ProcessOptions): [number, number] {
   return o.cropEnabled ? [o.cropWidth, o.cropHeight] : [src.width, src.height];
 }
 
-export function detect(lum: Lum, o: ProcessOptions): FrameDetection {
-  const det: FrameDetection = detectObject(lum, { threshold: o.threshold ?? undefined });
+/**
+ * Schnelle Analyse: Das Helligkeitsbild ist nur ein Ausschnitt (linke obere Ecke bei x, y im Bild der Grösse
+ * width × height); das ganze Bild liegt verkleinert vor (scale Bildpunkte je Punkt).
+ */
+export interface WholeView {
+  lum: Lum; scale: number; x: number; y: number; width: number; height: number;
+  /** Schwelle der Objektsuche am ganzen Bild – gilt auch im Ausschnitt */
+  objectThreshold: number;
+}
+
+export function detect(lum: Lum, o: ProcessOptions, whole?: WholeView): FrameDetection {
+  const det: FrameDetection = detectObject(lum, { threshold: o.threshold ?? whole?.objectThreshold });
   if (o.centreMode === "disc" && det.found) {
     const lunar = o.subject === "moon";
-    let [fit, kind] = lunar ? ([fitSunDisc(lum, { threshold: o.threshold ?? undefined }), "sun"] as [DiscFit, "sun" | "moon"]) : limbFit(lum, o);
+    // Ausschnitt: Hintergrund und Helligkeit der Scheibe vom ganzen Bild – dieselben Schwellen wie ohne Ausschnitt
+    const levels = whole ? { background: backgroundLevel(whole.lum), peak: percentile(whole.lum.data, 0.999) } : undefined;
+    let [fit, kind] = lunar ? ([fitSunDisc(lum, { threshold: o.threshold ?? undefined, levels }), "sun"] as [DiscFit, "sun" | "moon"]) : limbFit(lum, o, levels);
     // Einfach-Modus: überstrahlte Sonne im grossen Lichtschein (Handy ohne Filter, herangezoomt) – die Schwelle bei
     // halber Höhe liegt dann im Lichtschein, der „Rand“ wäre der Rand des Scheins. Gemessen wird am gesättigten Kern.
     if (!lunar && o.strictSun && fit.found && kind === "sun" && det.maxValue >= 0.98 && saturatedShare(lum, fit) < 0.3) {
@@ -318,12 +338,45 @@ export function detect(lum: Lum, o: ProcessOptions): FrameDetection {
       // Ist das überhaupt die Sonne? Deutlich kleiner als das Bild, und fast alles Helle gehört zu ihr
       // (Landschaft, Himmel, Personen: helle Flächen überall)
       if (o.strictSun && kind === "sun") {
-        const b = brightOutside(lum, fit);
+        // bei der schnellen Analyse am verkleinerten ganzen Bild (der Ausschnitt zeigt nur die Umgebung der Scheibe)
+        const b = whole
+          ? brightOutside(whole.lum, { cx: (fit.cx + whole.x) / whole.scale, cy: (fit.cy + whole.y) / whole.scale, r: fit.r / whole.scale, threshold: fit.threshold })
+          : brightOutside(lum, fit);
+        const minSide = whole ? Math.min(whole.width, whole.height) : Math.min(lum.width, lum.height);
         // Ausnahme für die dünne Sichel kurz vor der Totalität: wenig Helles in der Sichel, daneben etwas Dunst
-        det.disc.plausible = fit.r <= 0.45 * Math.min(lum.width, lum.height) && (b.share <= 0.3 || (fit.visibleLimb <= 0.45 && b.perDisc <= 0.1));
+        det.disc.plausible = fit.r <= 0.45 * minSide && (b.share <= 0.3 || (fit.visibleLimb <= 0.45 && b.perDisc <= 0.1));
       }
     }
   }
+  return det;
+}
+
+/** Längere Seite der verkleinerten Ansicht für die Grobsuche */
+const PREVIEW_SIDE = 800;
+
+/**
+ * Schnelle Analyse eines Fotos: alles Helle in der verkleinerten Ansicht suchen, dann nur diesen Bereich (mit
+ * reichlich Rand für Lichtschein, Korona und den Himmel als Hintergrund) in voller Auflösung vermessen.
+ * Liegt Helles über das ganze Bild verteilt (Landschaft), ist der Bereich das ganze Bild – dann ohne Zeitgewinn.
+ */
+async function detectFast(src: FrameSource, index: number, o: ProcessOptions): Promise<FrameDetection> {
+  const { frame: small, scale } = await src.readPreview!(index, PREVIEW_SIDE);
+  const lumS = lumFor(src, small, o);
+  const coarse = detectObject(lumS, { threshold: o.threshold ?? undefined });
+  if (!coarse.found) return coarse;
+  const bw = (coarse.x1 - coarse.x0 + 1) * scale, bh = (coarse.y1 - coarse.y0 + 1) * scale;
+  const m = Math.max(0.6 * Math.max(bw, bh), 4 * scale, 48);
+  const x0 = Math.max(0, Math.floor(coarse.x0 * scale - m)), y0 = Math.max(0, Math.floor(coarse.y0 * scale - m));
+  const x1 = Math.min(src.width, Math.ceil((coarse.x1 + 1) * scale + m)), y1 = Math.min(src.height, Math.ceil((coarse.y1 + 1) * scale + m));
+  const lum = lumFor(src, await src.readRegion!(index, x0, y0, x1 - x0, y1 - y0), o);
+  const det = detect(lum, o, { lum: lumS, scale, x: x0, y: y0, width: src.width, height: src.height, objectThreshold: coarse.threshold });
+  // zurück in die Koordinaten des ganzen Bildes
+  det.cx += x0; det.cy += y0;
+  det.x0 += x0; det.x1 += x0; det.y0 += y0; det.y1 += y0;
+  det.touchesEdge = det.found && (det.x0 <= 0 || det.y0 <= 0 || det.x1 >= src.width - 1 || det.y1 >= src.height - 1);
+  det.overexposed *= (lum.width * lum.height) / (src.width * src.height);
+  for (const c of [det.disc, det.disc?.moon, det.disc?.moonLoose])
+    if (c) { c.cx += x0; c.cy += y0; }
   return det;
 }
 
@@ -360,9 +413,9 @@ export function brightOutside(l: Lum, d: { cx: number; cy: number; r: number; th
  * Sonnenrand oder – in der Totalität – Mondrand. Ein Mond ringsum in Korona gilt als Totalität,
  * ausser die ganze Sonnenscheibe umschliesst ihn sichtbar (ringförmige Finsternis → Sonnenrand).
  */
-function limbFit(lum: Lum, o: ProcessOptions): [DiscFit, "sun" | "moon"] {
+function limbFit(lum: Lum, o: ProcessOptions, levels?: { background: number; peak: number }): [DiscFit, "sun" | "moon"] {
   const moon = fitMoonDisc(lum);
-  const sun = fitSunDisc(lum, { threshold: o.threshold ?? undefined });
+  const sun = fitSunDisc(lum, { threshold: o.threshold ?? undefined, levels });
   if (!moon.found) return [sun, "sun"];
   const annular =
     sun.found && sun.visibleLimb >= 0.8 && sun.r > moon.r * 1.01 &&
@@ -716,9 +769,21 @@ export async function processSource(
   // Oberfläche: erstes lesbares Bild ist die Referenz
   let aligner: SurfaceTracker | null = null;
 
+  // Fotoserie mit Teilansichten: nicht jedes Foto ganz auslesen (siehe fastAnalyse)
+  const fast = o.fastAnalyse && o.centreMode === "disc" && !!src.hasParts && !o.qualityEnabled && !rotates(o);
+
   // Durchlauf 1: erkennen und bewerten
   for (let k = 0; k < indices.length; k++) {
     if (shouldCancel()) throw new Error(msg("cancelled"));
+    if (fast) {
+      try {
+        results.push(judge(indices[k], await detectFast(src, indices[k], o), o));
+      } catch {
+        results.push({ index: indices[k], det: emptyDetection(), accepted: false, reason: msg("unreadable"), score: 0 });
+      }
+      onProgress("analyse", k + 1, indices.length);
+      continue;
+    }
     let frame: Frame;
     try {
       frame = await src.readFrame(indices[k]);
@@ -811,7 +876,7 @@ export async function processSource(
           const r = resOf.get(i)!;
           const [x0, y0] = originFor(src, o, r.det);
           const [cx, cy] = centreOf(src, o, r.det);
-          const f = colourise(cropFrame(await src.readFrame(i), x0, y0, cw, ch), o);
+          const f = colourise(fast ? await src.readRegion!(i, x0, y0, cw, ch) : cropFrame(await src.readFrame(i), x0, y0, cw, ch), o);
           parts.push({ frame: f, exposure: src.exposure!(i)!, dx: cx - o.offsetX - cw / 2 - x0, dy: cy - o.offsetY - ch / 2 - y0 });
         }
         // Ausrichtung relativ zum ersten Bild der Reihe: dessen Lage bleibt (wie bei den Einzelbildern)
@@ -825,20 +890,21 @@ export async function processSource(
         written.push(res.index);
       }
     } else {
-      const frame = await src.readFrame(res.index);
+      // schnelle Analyse: nur den Ausschnitt lesen
+      const frame = fast ? null : await src.readFrame(res.index);
       if (res.zoom && !rotates(o)) {
         // anderer Zoom: grösseren bzw. kleineren Ausschnitt nehmen und auf die Ausgabegrösse bringen
         const bw = Math.max(2, Math.round(cw / res.zoom)), bh = Math.max(2, Math.round(ch / res.zoom));
         const [cx, cy] = centreOf(src, o, res.det);
-        const [x0, y0] = cropOrigin(cx - o.offsetX / res.zoom, cy - o.offsetY / res.zoom, bw, bh, frame.colorId, bayerPatternFor(o, frame) !== null);
+        const [x0, y0] = cropOrigin(cx - o.offsetX / res.zoom, cy - o.offsetY / res.zoom, bw, bh, frame ? frame.colorId : src.colorId, !!frame && bayerPatternFor(o, frame) !== null);
         res.origin = [x0, y0];
         res.zoom = cw / bw;
-        const out = resize(colourise(cropFrame(frame, x0, y0, bw, bh), o), cw, ch);
+        const out = resize(colourise(frame ? cropFrame(frame, x0, y0, bw, bh) : await src.readRegion!(res.index, x0, y0, bw, bh), o), cw, ch);
         if (o.strictSun) fillOutside(out, x0, y0, res.zoom, src.width, src.height);
         await sink(finishFrame(out, o), res, written.length, ts);
       } else {
         res.origin = rotates(o) ? undefined : originFor(src, o, res.det);
-        const out = outputCrop(src, frame, o, res.det, cw, ch);
+        const out = frame ? outputCrop(src, frame, o, res.det, cw, ch) : await src.readRegion!(res.index, res.origin![0], res.origin![1], cw, ch);
         if (o.strictSun && res.origin) fillOutside(out, res.origin[0], res.origin[1], 1, src.width, src.height);
         await sink(finishFrame(out, o), res, written.length, ts);
       }

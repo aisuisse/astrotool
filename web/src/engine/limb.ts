@@ -33,6 +33,11 @@ export interface DiscOptions {
   workSize?: number;
   /** Zufallsquelle (für reproduzierbare Tests) */
   random?: () => number;
+  /**
+   * Helligkeit von Hintergrund und Scheibe vorgeben statt sie aus diesem Bild zu bestimmen – wenn das Bild nur ein
+   * Ausschnitt ist (schnelle Analyse): Die Schwellen sollen dieselben sein wie am ganzen Bild.
+   */
+  levels?: { background: number; peak: number };
 }
 
 const notFound = (thr: number): DiscFit => ({ found: false, cx: 0, cy: 0, r: 0, visibleLimb: 0, rms: 0, threshold: thr, x0: 0, y0: 0, x1: 0, y1: 0 });
@@ -138,7 +143,8 @@ export function fitSunDisc(l: Lum, opts: DiscOptions = {}): DiscFit {
   const rand = opts.random ?? seeded(12345);
   const f = Math.max(1, Math.ceil(Math.max(l.width, l.height) / (opts.workSize ?? 1200)));
   const s = downsample(l, f);
-  const thr = opts.threshold ?? halfMaxThreshold(s);
+  const lv = opts.levels;
+  const thr = opts.threshold ?? (lv ? lv.background + (lv.peak - lv.background) / 2 : halfMaxThreshold(s));
   const { mask, count } = largestBlob(s, thr);
   if (count < 30) return notFound(thr);
 
@@ -195,6 +201,7 @@ export function fitSunDisc(l: Lum, opts: DiscOptions = {}): DiscFit {
   // Teleskope, echte Serie Metz 2026: Mitte 158, Rand 70–90) ist der Rand dunkler als die Hälfte der Mitte – dann
   // fielen fast alle Randpunkte weg. 30 % der Spanne liegen sicher über der Mondscheibe und dem Himmel.
   const innerThr = opts.threshold ?? (() => {
+    if (lv) return lv.background + 0.3 * (lv.peak - lv.background);
     const bg = backgroundLevel(s);
     return bg + 0.3 * (percentile(s.data, 0.999) - bg);
   })();

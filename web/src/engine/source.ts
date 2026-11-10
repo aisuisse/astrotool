@@ -30,6 +30,14 @@ export interface FrameSource {
   readonly linear?: boolean;
   /** Bildrate laut Datei (Videos ohne Zeitstempel je Bild) */
   readonly fps?: number | null;
+  /**
+   * Teilansichten ohne das ganze Bild auszulesen (Fotos im Browser): das ganze Bild verkleinert und Ausschnitte
+   * in voller Auflösung. readRegion liefert dasselbe wie readFrame + Zuschneiden. Für die schnelle Analyse.
+   */
+  readonly hasParts?: boolean;
+  /** Ganzes Bild verkleinert (längere Seite etwa maxSide); scale = Bildpunkte je Punkt der Ansicht */
+  readPreview?(index: number, maxSide: number): Promise<{ frame: Frame; scale: number }>;
+  readRegion?(index: number, x: number, y: number, w: number, h: number): Promise<Frame>;
 }
 
 export function serSource(r: SerReader, baseName: string): FrameSource {
@@ -55,8 +63,13 @@ export function serSource(r: SerReader, baseName: string): FrameSource {
 
 /** Dekodiert ein Bild zu RGBA (8 bit). Im Browser: createImageBitmap + OffscreenCanvas; in Node: z. B. jpeg-js. */
 /** raw = true: Kamera-RAW (NEF, CR2, …). Ergebnis: RGBA-Bild oder – bei RAW-Rohdaten – direkt ein Frame (Bayer, 16 bit). */
-export type DecodedImage = { width: number; height: number; rgba: Uint8Array | Uint8ClampedArray; frame?: undefined } | { width: number; height: number; frame: Frame; rgba?: undefined };
-export type ImageDecoder = (file: Blob, raw?: boolean) => Promise<DecodedImage>;
+export type DecodedImage =
+  | { width: number; height: number; rgba: Uint8Array | Uint8ClampedArray; frame?: undefined; /** Grösse des ganzen Bildes (bei Teilansichten) */ fullWidth?: number; fullHeight?: number }
+  | { width: number; height: number; frame: Frame; rgba?: undefined; fullWidth?: undefined; fullHeight?: undefined };
+/** Teil eines Bildes: das ganze Bild verkleinert (scale = Bildpunkte je Ausgabepunkt) oder ein Ausschnitt in voller Auflösung */
+export type ImagePart = { scale: number } | { x: number; y: number; w: number; h: number };
+/** parts: Der Dekoder liefert Teilansichten (dritter Parameter), ohne das ganze Bild auszulesen */
+export type ImageDecoder = ((file: Blob, raw?: boolean, part?: ImagePart) => Promise<DecodedImage>) & { parts?: boolean };
 
 const UNIX_EPOCH_TICKS = 621_355_968_000_000_000n;
 export const msToTicks = (ms: number) => UNIX_EPOCH_TICKS + BigInt(Math.round(ms)) * 10_000n;
@@ -170,6 +183,77 @@ export class ImageSequenceSource implements FrameSource {
     return this.entries[i].name;
   }
 
+  get hasParts(): boolean {
+    return !this.linear && !!this.decode.parts;
+  }
+
+  /** je Bild: Grösse des Fotos und Hintergrundfarbe (aus der verkleinerten Ansicht) */
+  private partInfo = new Map<number, { w: number; h: number; bg: [number, number, number] | null }>();
+
+  async readPreview(index: number, maxSide: number): Promise<{ frame: Frame; scale: number }> {
+    const e = this.entries[index];
+    const W = this.width, H = this.height;
+    const scale = Math.max(1, Math.max(W, H) / maxSide);
+    const img = await this.decode(e.file, e.raw, { scale });
+    if (!img.rgba) throw new Error(msg("unreadable"));
+    const iw = img.fullWidth ?? Math.round(img.width * scale), ih = img.fullHeight ?? Math.round(img.height * scale);
+    const bg = this.padBackground && (iw !== W || ih !== H) ? medianColour(img.rgba) : null;
+    this.partInfo.set(index, { w: iw, h: ih, bg });
+    const pw = Math.max(1, Math.round(W / scale)), ph = Math.max(1, Math.round(H / scale));
+    const data = new Uint8Array(pw * ph * 3);
+    if (bg) for (let i = 0; i < pw * ph; i++) { data[i * 3] = bg[0]; data[i * 3 + 1] = bg[1]; data[i * 3 + 2] = bg[2]; }
+    // Foto mittig im Bildfeld (wie readFrame)
+    const ox = Math.round(Math.floor((W - iw) / 2) / scale), oy = Math.round(Math.floor((H - ih) / 2) / scale);
+    for (let y = 0; y < ph; y++) {
+      const sy = y - oy;
+      if (sy < 0 || sy >= img.height) continue;
+      for (let x = 0; x < pw; x++) {
+        const sx = x - ox;
+        if (sx < 0 || sx >= img.width) continue;
+        const s = (sy * img.width + sx) * 4, d = (y * pw + x) * 3;
+        data[d] = img.rgba[s];
+        data[d + 1] = img.rgba[s + 1];
+        data[d + 2] = img.rgba[s + 2];
+      }
+    }
+    return { frame: { width: pw, height: ph, planes: 3, bitDepth: 8, colorId: SerColor.RGB, data }, scale };
+  }
+
+  async readRegion(index: number, x: number, y: number, w: number, h: number): Promise<Frame> {
+    const e = this.entries[index];
+    if (!this.partInfo.has(index)) await this.readPreview(index, 256);
+    const info = this.partInfo.get(index)!;
+    const W = this.width, H = this.height;
+    const data = new Uint8Array(w * h * 3);
+    // Teil des Bildfelds im Ausschnitt: dort der Hintergrund kleinerer Fotos; ausserhalb bleibt es schwarz
+    const fx0 = Math.max(0, x), fy0 = Math.max(0, y), fx1 = Math.min(W, x + w), fy1 = Math.min(H, y + h);
+    if (info.bg)
+      for (let yy = fy0; yy < fy1; yy++)
+        for (let xx = fx0; xx < fx1; xx++) {
+          const d = ((yy - y) * w + (xx - x)) * 3;
+          data[d] = info.bg[0];
+          data[d + 1] = info.bg[1];
+          data[d + 2] = info.bg[2];
+        }
+    // Teil des Fotos im Ausschnitt (Foto liegt mittig im Bildfeld; ein grösseres Foto ist auf das Bildfeld beschnitten)
+    const ox = Math.floor((W - info.w) / 2), oy = Math.floor((H - info.h) / 2);
+    const vx0 = Math.max(fx0, ox), vy0 = Math.max(fy0, oy), vx1 = Math.min(fx1, ox + info.w), vy1 = Math.min(fy1, oy + info.h);
+    if (vx1 > vx0 && vy1 > vy0) {
+      const pw = vx1 - vx0, ph = vy1 - vy0;
+      const img = await this.decode(e.file, e.raw, { x: vx0 - ox, y: vy0 - oy, w: pw, h: ph });
+      if (!img.rgba || img.width !== pw || img.height !== ph) throw new Error(msg("unreadable"));
+      for (let yy = 0; yy < ph; yy++) {
+        let s = yy * pw * 4, d = ((vy0 - y + yy) * w + (vx0 - x)) * 3;
+        for (let xx = 0; xx < pw; xx++, s += 4, d += 3) {
+          data[d] = img.rgba[s];
+          data[d + 1] = img.rgba[s + 1];
+          data[d + 2] = img.rgba[s + 2];
+        }
+      }
+    }
+    return { width: w, height: h, planes: 3, bitDepth: 8, colorId: SerColor.RGB, data };
+  }
+
   exposure(i: number): number | undefined {
     const e = this.entries[i].exif;
     if (!(e.exposureTime && e.exposureTime > 0)) return undefined;
@@ -192,11 +276,7 @@ export class ImageSequenceSource implements FrameSource {
     if (this.padBackground && (img.width !== w || img.height !== h)) {
       // Rand in der häufigsten Helligkeit des Bildes (Himmel) – schwarz wäre vor hellem Himmel eine scharfe Kante,
       // und die Erkennung hielte das ganze Bild für ein helles Objekt
-      const bg = [0, 1, 2].map((c) => {
-        const s: number[] = [];
-        for (let i = c; i < img.rgba!.length; i += 4 * 97) s.push(img.rgba![i]);
-        return s.sort((a, b) => a - b)[s.length >> 1] ?? 0;
-      });
+      const bg = medianColour(img.rgba!);
       for (let i = 0; i < w * h; i++) { data[i * 3] = bg[0]; data[i * 3 + 1] = bg[1]; data[i * 3 + 2] = bg[2]; }
     }
     for (let y = 0; y < h; y++) {
@@ -218,6 +298,15 @@ export class ImageSequenceSource implements FrameSource {
     if (this.entries.some((e) => e.timeMs === null)) return null;
     return BigInt64Array.from(this.entries.map((e) => msToTicks(e.timeMs!)));
   }
+}
+
+/** Häufigste Helligkeit je Farbe (Median aus Stichproben) – der Himmel als Füllfarbe für den Rand */
+function medianColour(rgba: Uint8Array | Uint8ClampedArray): [number, number, number] {
+  return [0, 1, 2].map((c) => {
+    const s: number[] = [];
+    for (let i = c; i < rgba.length; i += 4 * 97) s.push(rgba[i]);
+    return s.sort((a, b) => a - b)[s.length >> 1] ?? 0;
+  }) as [number, number, number];
 }
 
 /** Kopf des ersten Bildteils einer FITS-Datei (oder des Hauptkopfs, wenn die Datei nicht lesbar ist) */

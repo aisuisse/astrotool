@@ -209,6 +209,8 @@ export function calibratedSource(src: FrameSource, cal: Calibration): FrameSourc
   return new Proxy(src, {
     get(target, prop) {
       if (prop === "readFrame") return async (i: number) => c.apply(await target.readFrame(i), target.exposure?.(i) ?? undefined);
+      // Teilansichten gingen an Dark und Flat vorbei
+      if (prop === "hasParts") return false;
       // Getter und Methoden auf dem Original ausführen (Klassen mit privaten Feldern)
       const v = Reflect.get(target, prop, target);
       return typeof v === "function" ? v.bind(target) : v;

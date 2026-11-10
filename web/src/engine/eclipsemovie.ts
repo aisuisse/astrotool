@@ -1,6 +1,6 @@
 // Finsternis-Film: Schärfe am Sonnenrand, zeittreue Zeitachse mit Zwischenbildern.
 // Eigenständige Implementierung.
-import { sample } from "./limb";
+import { fitCircle, sample } from "./limb";
 import type { Lum } from "./image";
 import type { FrameResult } from "./pipeline";
 
@@ -229,6 +229,13 @@ export function synthFrame(A: Rgba, B: Rgba, fa: MovieFrame, fb: MovieFrame, w: 
   };
   if (w <= 0) return new Uint8ClampedArray(A.data);
   if (w >= 1) return new Uint8ClampedArray(B.data);
+  // Zwei Verfahren. Kurzer Weg des Mondes zwischen den beiden Fotos (die meisten Lücken): den Mond samt Rand
+  // verschieben – das braucht nur den Weg, nicht die genaue Lage des Mondrands, und ist darum auch bei überstrahlten
+  // Fotos sicher. Langer Weg (ab einem Viertel des Sonnenradius, etwa 8 Minuten): Dort entstünden beim Verschieben
+  // dunkle Flecken und Reste des alten Rands; gerechnet wird dann mit einem Modell des Fotos – wenn es zu beiden
+  // Fotos passt.
+  const way = Math.hypot(fa.moon!.cx - fa.sun!.cx - (fb.moon!.cx - fb.sun!.cx), fa.moon!.cy - fa.sun!.cy - (fb.moon!.cy - fb.sun!.cy));
+  const synthFrom = way > 0.25 * fa.sun!.r && sunModel(A, fa.sun!, fa.moon!).ok && sunModel(B, fb.sun!, fb.moon!).ok ? modelFrom : warpFrom;
   // aus dem näheren Bild; nur um die Mitte herum überblenden (bei grossen Lücken sehen Dunst und Mondrand in den
   // beiden Bildern verschieden aus – gleichmässig gemischt ergäbe das doppelte Ränder)
   const wb = smooth((w - 0.42) / 0.16);
@@ -241,14 +248,290 @@ export function synthFrame(A: Rgba, B: Rgba, fa: MovieFrame, fb: MovieFrame, w: 
   return out;
 }
 
+type Circle = { cx: number; cy: number; r: number };
+
+/** Spitzen der Sichel: Schnittpunkte von Sonnen- und Mondrand [x1, y1, x2, y2] – oder null (kein Schnitt) */
+function hornTips(s: Circle, m: Circle): number[] | null {
+  const dx = m.cx - s.cx, dy = m.cy - s.cy, d = Math.hypot(dx, dy);
+  if (d < 1e-6 || d >= s.r + m.r || d <= Math.abs(s.r - m.r)) return null;
+  const a = (s.r * s.r - m.r * m.r + d * d) / (2 * d), h = Math.sqrt(Math.max(0, s.r * s.r - a * a));
+  const bx = s.cx + (a * dx) / d, by = s.cy + (a * dy) / d;
+  return [bx - (h * dy) / d, by + (h * dx) / d, bx + (h * dy) / d, by - (h * dx) / d];
+}
+
 /**
- * Zwischenbild aus einem Grundbild N: Der Mond wird mitsamt seinem Rand und dem Lichtschein darin um die Strecke
+ * Lage eines Bildpunkts zur sichtbaren Sonne (Sonnenscheibe ohne Mondscheibe). Rückgabe: Abstand zu ihrem Rand in
+ * Pixel – innen positiv, aussen (Himmel und Mond vor der Sonne) negativ. Dazu in `fieldMix` (0…1), welcher Rand
+ * innen näher liegt: 0 = Sonnenrand, 1 = Mondrand; der Übergang ist weich (Breite tau), damit im gerechneten Bild
+ * keine Naht entsteht.
+ */
+let fieldMix = 0;
+function crescentField(x: number, y: number, s: Circle, m: Circle, tips: number[] | null, tau: number): number {
+  const dxs = x - s.cx, dys = y - s.cy, ds = Math.sqrt(dxs * dxs + dys * dys);
+  const dxm = x - m.cx, dym = y - m.cy, dm = Math.sqrt(dxm * dxm + dym * dym);
+  const inS = ds < s.r, inM = dm < m.r;
+  if (inS && !inM) {
+    const a = s.r - ds, b = dm - m.r;
+    fieldMix = smooth(0.5 + (a - b) / (2 * tau));
+    return a < b ? a : b;
+  }
+  let best = Infinity;
+  if (!inS && ds > 1e-6) {
+    // nächster Punkt des Sonnenrands – wenn ihn der Mond nicht verdeckt
+    const qx = s.cx + (dxs * s.r) / ds - m.cx, qy = s.cy + (dys * s.r) / ds - m.cy;
+    if (qx * qx + qy * qy >= m.r * m.r) best = ds - s.r;
+  }
+  if (inM && dm > 1e-6) {
+    // nächster Punkt des Mondrands – wenn er vor der Sonne liegt
+    const qx = m.cx + (dxm * m.r) / dm - s.cx, qy = m.cy + (dym * m.r) / dm - s.cy;
+    if (qx * qx + qy * qy <= s.r * s.r) best = Math.min(best, m.r - dm);
+  }
+  if (tips) {
+    best = Math.min(best, Math.hypot(x - tips[0], y - tips[1]), Math.hypot(x - tips[2], y - tips[3]));
+  }
+  if (best === Infinity) best = Math.max(0, ds - s.r, m.r - dm);
+  // Aussen gibt es nur eine Art: Der Lichtschein fällt vor dem Mond so ab wie am Himmel neben der Sonne. Getrennte
+  // Tabellen ergäben eine Stufe entlang des Sonnenrands, den der Mond verdeckt – dort ist im Foto nichts zu sehen.
+  fieldMix = 0;
+  return -best;
+}
+
+/**
+ * Mondrand am Foto nachmessen. Die Lage des Mondes kommt aus der Serie (Messung am Originalfoto oder ergänzte
+ * Bahn); in überstrahlten Fotos sitzt der sichtbare Rand aber je nach Belichtung um viele Pixel daneben (der
+ * Lichtschein frisst den Mond an). Für das Modell zählt der Rand, wie er in diesem Foto aussieht.
+ * Entlang von Strahlen vom Mondmittelpunkt – nur wo der Rand vor der Sonne liegt – wird die Stelle gesucht, an der
+ * die Helligkeit die Mitte zwischen Mond und Sonne kreuzt; durch diese Punkte kommt ein Kreis. Ohne klares Ergebnis
+ * (zu wenig Rand, Kreis weit weg von der Vorgabe) bleibt die Vorgabe.
+ */
+export function refineMoon(N: Rgba, s: Circle, m: Circle): Circle {
+  const W = N.width, H = N.height, D = N.data;
+  const lumAt = (x: number, y: number) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    if (xi < 0 || yi < 0 || xi >= W || yi >= H) return -1;
+    const i = (yi * W + xi) * 4;
+    return (D[i] + D[i + 1] + D[i + 2]) / 3;
+  };
+  const search = Math.max(8, 0.25 * m.r), margin = Math.max(4, 0.06 * s.r);
+  // Helligkeit der freien Sonne (Median über die Scheibe abseits des Mondes) – der Rand liegt auf halbem Weg dorthin.
+  // Aus dem Strahl allein ginge das nicht: Nahe der Sichelspitzen endet er im Lichtschein, bevor er die Sonne erreicht.
+  const free: number[] = [];
+  const stepS = Math.max(1, Math.round(s.r / 40));
+  for (let y = Math.max(0, Math.ceil(s.cy - s.r)); y <= Math.min(H - 1, s.cy + s.r); y += stepS)
+    for (let x = Math.max(0, Math.ceil(s.cx - s.r)); x <= Math.min(W - 1, s.cx + s.r); x += stepS) {
+      if (Math.hypot(x - s.cx, y - s.cy) > s.r - 2 * margin || Math.hypot(x - m.cx, y - m.cy) < m.r + search) continue;
+      const i = (y * W + x) * 4;
+      free.push((D[i] + D[i + 1] + D[i + 2]) / 3);
+    }
+  if (free.length < 20) return m;
+  const sunLevel = free.sort((a, b) => a - b)[free.length >> 1];
+  const xs: number[] = [], ys: number[] = [];
+  const prof: number[] = [];
+  const rays = 240;
+  for (let k = 0; k < rays; k++) {
+    const ang = (2 * Math.PI * k) / rays, ca = Math.cos(ang), sa = Math.sin(ang);
+    // Profil von innen (Mond) nach aussen (Sonne), nur innerhalb der Sonnenscheibe
+    prof.length = 0;
+    let t0 = -1;
+    for (let t = m.r - search; t <= m.r + search; t++) {
+      const x = m.cx + ca * t, y = m.cy + sa * t;
+      if (Math.hypot(x - s.cx, y - s.cy) > s.r - margin) {
+        if (prof.length) break;
+        continue;
+      }
+      const v = lumAt(x, y);
+      if (v < 0) {
+        if (prof.length) break;
+        continue;
+      }
+      if (!prof.length) t0 = t;
+      prof.push(v);
+    }
+    if (prof.length < 12) continue;
+    const sorted = [...prof].sort((a, b) => a - b);
+    const lo = sorted[Math.floor(sorted.length * 0.1)], hi = sunLevel;
+    if (hi - lo < 30) continue;
+    const mid = (lo + hi) / 2;
+    // erster Durchgang nach oben, der oben bleibt
+    for (let i = 1; i < prof.length - 3; i++) {
+      if (prof[i - 1] < mid && prof[i] >= mid && prof[i + 1] >= mid && prof[i + 2] >= mid) {
+        // innen muss es vorher wirklich dunkel gewesen sein (sonst begann das Profil schon in der Sonne)
+        if (Math.min(...prof.slice(0, i)) > lo + 0.25 * (hi - lo)) break;
+        const t = t0 + i - 1 + (mid - prof[i - 1]) / Math.max(1e-6, prof[i] - prof[i - 1]);
+        xs.push(m.cx + ca * t);
+        ys.push(m.cy + sa * t);
+        break;
+      }
+    }
+  }
+  if (xs.length < 16) return m;
+  let keep = xs.map((_, i) => i);
+  let c = fitCircle(xs, ys);
+  for (let round = 0; round < 3 && c; round++) {
+    const res = keep.map((i) => Math.hypot(xs[i] - c!.cx, ys[i] - c!.cy) - c!.r);
+    const med = [...res].sort((a, b) => a - b)[res.length >> 1];
+    const mad = [...res.map((v) => Math.abs(v - med))].sort((a, b) => a - b)[res.length >> 1];
+    const lim = Math.max(1.5, 3 * 1.4826 * mad);
+    const next = keep.filter((_, j) => Math.abs(res[j] - med) <= lim);
+    if (next.length === keep.length || next.length < 16) break;
+    keep = next;
+    c = fitCircle(keep.map((i) => xs[i]), keep.map((i) => ys[i]));
+  }
+  if (!c || keep.length < 16) return m;
+  // genug Rand (ein Sechstel des Kreises) und nicht weit von der Vorgabe
+  if (keep.length < rays / 6 || Math.abs(c.r - m.r) > 0.15 * m.r || Math.hypot(c.cx - m.cx, c.cy - m.cy) > 0.25 * m.r) return m;
+  return { cx: c.cx, cy: c.cy, r: c.r };
+}
+
+/** Schrittweite der Helligkeitstabelle in Pixel Abstand */
+const LUT_STEP = 0.5;
+
+/**
+ * Modell eines Fotos der partiellen Phase: Wie hell ist es in welchem Abstand vom Rand der sichtbaren Sonne?
+ * Tabellen für die Sonne am Sonnenrand, die Sonne am Mondrand und für aussen (Himmel, Mond vor der Sonne), je Farbe
+ * gemittelt über das ganze Bild. Die Tabellen enthalten damit den weichen Rand und den Lichtschein genau so, wie sie im Foto sind.
+ */
+interface SunModel {
+  key: string;
+  /** Mond, wie er in diesem Foto aussieht (refineMoon) – darauf beziehen sich Abstände und Tabellen */
+  moon: Circle;
+  /** je Bildpunkt: Abstand und Rand-Art (siehe crescentField) */
+  d: Float32Array;
+  mix: Uint8Array;
+  /** [Tabelle][Abstandsstufe][Farbe] */
+  lut: Float32Array;
+  dMin: number;
+  bins: number;
+  tau: number;
+  /**
+   * Passt das Modell zum Foto? Nein, wenn der Mondrand nicht dort liegt, wo er gemessen wurde (dünne Sichel tief
+   * am Horizont, Bäume, Wolken): Dann ist am angenommenen Rand kein Hell-Dunkel-Übergang, oder das Foto weicht dort
+   * stark vom Modell ab.
+   */
+  ok: boolean;
+}
+const models = new WeakMap<Rgba, SunModel>();
+
+export function sunModel(N: Rgba, s: Circle, m0: Circle): SunModel {
+  const key = [s.cx, s.cy, s.r, m0.cx, m0.cy, m0.r].join(",");
+  const hit = models.get(N);
+  if (hit && hit.key === key) return hit;
+  const m = refineMoon(N, s, m0);
+  const W = N.width, H = N.height, tau = 0.08 * s.r;
+  const dMin = -0.9 * s.r, bins = Math.ceil((s.r - dMin) / LUT_STEP) + 2;
+  const d = new Float32Array(W * H), mix = new Uint8Array(W * H);
+  const sum = new Float64Array(4 * bins * 3), cnt = new Uint32Array(4 * bins);
+  const tips = hornTips(s, m);
+  for (let y = 0, i = 0; y < H; y++)
+    for (let x = 0; x < W; x++, i++) {
+      const v = crescentField(x, y, s, m, tips, tau);
+      d[i] = v;
+      mix[i] = Math.round(fieldMix * 255);
+      if (v < dMin) continue;
+      // nur eindeutige Punkte in die Tabellen (nicht aus dem Übergang zwischen zwei Rand-Arten)
+      if (fieldMix > 0.2 && fieldMix < 0.8) continue;
+      const t = (v > 0 ? 0 : 2) + (fieldMix >= 0.5 ? 1 : 0);
+      const b = t * bins + Math.min(bins - 1, Math.round((v - dMin) / LUT_STEP));
+      cnt[b]++;
+      sum[b * 3] += N.data[i * 4];
+      sum[b * 3 + 1] += N.data[i * 4 + 1];
+      sum[b * 3 + 2] += N.data[i * 4 + 2];
+    }
+  const lut = new Float32Array(4 * bins * 3);
+  // belegter Bereich je Tabelle (Stufen mit genug Bildpunkten)
+  const first = [-1, -1, -1, -1], last = [-1, -1, -1, -1];
+  for (let t = 0; t < 4; t++) {
+    // Mittelwerte; Lücken im Inneren linear füllen
+    for (let b = 0; b < bins; b++) {
+      const k = t * bins + b;
+      if (cnt[k] < 3) continue;
+      for (let c = 0; c < 3; c++) lut[k * 3 + c] = sum[k * 3 + c] / cnt[k];
+      if (first[t] < 0) first[t] = b;
+      else
+        for (let j = last[t] + 1; j < b; j++) {
+          const f = (j - last[t]) / (b - last[t]);
+          for (let c = 0; c < 3; c++) lut[(t * bins + j) * 3 + c] = lut[(t * bins + last[t]) * 3 + c] * (1 - f) + lut[k * 3 + c] * f;
+        }
+      last[t] = b;
+    }
+  }
+  // Über den belegten Bereich hinaus: die Form der verwandten Tabelle, an der Grenze angepasst. Beispiel: Der Mond
+  // schneidet die Sonne erst wenig an – „Mond vor der Sonne“ ist dann nur bis zu einer geringen Tiefe belegt; tiefer
+  // im Mond fällt der Lichtschein so ab wie am Himmel neben der Sonne.
+  for (const [t, u] of [[1, 0], [0, 1], [3, 2], [2, 3]]) {
+    const T = t * bins * 3, U = u * bins * 3;
+    if (first[t] < 0) {
+      if (first[u] >= 0) lut.copyWithin(T, U, U + bins * 3);
+      continue;
+    }
+    const extend = (edge: number, from: number, to: number) => {
+      for (let c = 0; c < 3; c++) {
+        const own = lut[T + edge * 3 + c];
+        // Verhältnis an der Grenze (verwandte Tabelle dort belegt und nicht null), sonst gleichbleibend fortsetzen
+        const ref = first[u] >= 0 && edge >= first[u] && edge <= last[u] ? lut[U + edge * 3 + c] : 0;
+        for (let j = from; j <= to; j++) {
+          const sib = first[u] >= 0 && j >= first[u] && j <= last[u] ? lut[U + j * 3 + c] : -1;
+          lut[T + j * 3 + c] = ref > 1 && sib >= 0 ? Math.min(255, (own * sib) / ref) : own;
+        }
+      }
+    };
+    extend(first[t], 0, first[t] - 1);
+    extend(last[t], last[t] + 1, bins - 1);
+  }
+  // was dann noch fehlt (auch die verwandte Tabelle endet): gleichbleibend fortsetzen; danach leicht glätten
+  for (let t = 0; t < 4; t++) {
+    if (first[t] < 0 && first[t ^ 1] < 0) continue;
+    for (let c = 0; c < 3; c++) {
+      let prev = lut[t * bins * 3 + c];
+      for (let b = 1; b < bins - 1; b++) {
+        const k = (t * bins + b) * 3 + c, cur = lut[k];
+        lut[k] = 0.25 * prev + 0.5 * cur + 0.25 * lut[k + 3];
+        prev = cur;
+      }
+    }
+  }
+  const model: SunModel = { key, moon: m, d, mix, lut, dMin, bins, tau, ok: true };
+  // Probe am angenommenen Mondrand (vor der Sonne): Übergang vorhanden, und das Foto folgt dem Modell?
+  {
+    const band = Math.max(6, 0.04 * s.r), v = new Float32Array(3);
+    modelValue(model, band, 1, v);
+    const bright = v[0] + v[1] + v[2];
+    modelValue(model, -band, 0, v);
+    const contrast = (bright - (v[0] + v[1] + v[2])) / 3;
+    let err = 0, n = 0;
+    for (let y = 1; y < H; y += 2)
+      for (let x = 1; x < W; x += 2) {
+        if (Math.abs(Math.hypot(x - m.cx, y - m.cy) - m.r) > band || Math.hypot(x - s.cx, y - s.cy) > s.r - band) continue;
+        const i = y * W + x;
+        modelValue(model, d[i], mix[i] / 255, v);
+        err += Math.abs(N.data[i * 4] - v[0]) + Math.abs(N.data[i * 4 + 1] - v[1]) + Math.abs(N.data[i * 4 + 2] - v[2]);
+        n += 3;
+      }
+    model.ok = n < 30 || (contrast >= 12 && err / n <= 0.55 * contrast);
+  }
+  models.set(N, model);
+  return model;
+}
+
+/** Helligkeit laut Modell für Abstand d und Rand-Art mix (0…1) – in out[0..2] */
+function modelValue(M: SunModel, d: number, mix: number, out: Float32Array): void {
+  const f = Math.min(M.bins - 1.001, Math.max(0, (d - M.dMin) / LUT_STEP));
+  const b = Math.floor(f), g = f - b;
+  const t0 = ((d > 0 ? 0 : 2) * M.bins + b) * 3, t1 = t0 + M.bins * 3, L = M.lut;
+  for (let c = 0; c < 3; c++) {
+    const v0 = L[t0 + c] * (1 - g) + L[t0 + 3 + c] * g, v1 = L[t1 + c] * (1 - g) + L[t1 + 3 + c] * g;
+    out[c] = v0 * (1 - mix) + v1 * mix;
+  }
+}
+
+/**
+ * Zwischenbild aus einem Grundbild N für kurze Wege des Mondes: Der Mond wird mitsamt seinem Rand und dem Lichtschein darin um die Strecke
  * verschoben, die er bis zu dieser Zeit wandert (Bild an der verschobenen Stelle abgetastet) – so bleibt der Rand
  * so weich und so hell wie im Foto. Ausserhalb des Mondes bleibt das Grundbild; wo der Mond im Grundbild noch
  * davor stand, jetzt aber nicht mehr, kommt die Sonne aus dem anderen Bild O (dort ist sie frei, weil der Mond auf
  * seiner Bahn weiterzieht), in der Helligkeit angeglichen.
  */
-function synthFrom(N: Rgba, O: Rgba, fN: MovieFrame, fO: MovieFrame, off: { x: number; y: number; r: number }): Uint8ClampedArray<ArrayBuffer> {
+function warpFrom(N: Rgba, O: Rgba, fN: MovieFrame, fO: MovieFrame, off: { x: number; y: number; r: number }): Uint8ClampedArray<ArrayBuffer> {
   const sN = fN.sun!, sO = fO.sun!, mN = fN.moon!, mO = fO.moon!;
   const W = N.width, H = N.height;
   const out = new Uint8ClampedArray(N.data);
@@ -284,7 +567,8 @@ function synthFrom(N: Rgba, O: Rgba, fN: MovieFrame, fO: MovieFrame, off: { x: n
       // Anteil verschobener Mond: im Mond und in seinem Randbereich, nur vor der Sonne (vor dem Himmel ist der
       // Mond nicht zu sehen – dort bleibt der Lichtschein um die Sonne)
       const k = cov(dT, mr + ramp) * cov(Math.hypot(x - sN.cx, y - sN.cy), rS + ramp);
-      const nCov = cov(Math.hypot(x - mN.cx, y - mN.cy), mN.r + 0.5 * ramp);
+      // (nur vor der Sonne – daneben ist der Mond nicht zu sehen, dort bleibt der Lichtschein des Grundbilds)
+      const nCov = cov(Math.hypot(x - mN.cx, y - mN.cy), mN.r + 0.5 * ramp) * cov(Math.hypot(x - sN.cx, y - sN.cy), rS + ramp);
       if (k === 0 && nCov === 0) continue;
       const i = (y * W + x) * 4;
       // verschobene Stelle im Grundbild (Radius leicht angepasst, falls er sich ändert)
@@ -295,6 +579,98 @@ function synthFrom(N: Rgba, O: Rgba, fN: MovieFrame, fO: MovieFrame, off: { x: n
         // Grund: wo der Mond im Grundbild stand und hier jetzt Sonne sein soll, die Sonne aus dem anderen Bild
         const base = nCov > 0 && oCov < nCov ? n + nCov * (bilinear(O, x + sx, y + sy, c) * gain[c] - n) : n;
         out[i + c] = k > 0 ? k * bilinear(N, qx, qy, c) + (1 - k) * base : base;
+      }
+    }
+  return out;
+}
+
+/**
+ * Zwischenbild aus einem Grundbild N für lange Wege des Mondes (grosse Lücken): Das Foto bleibt, wie es ist; geändert wird nur, was sich durch den Weg des
+ * Mondes ändert. Dafür sagt ein Modell des Fotos (sunModel), wie hell es in welchem Abstand vom Rand der sichtbaren
+ * Sonne ist – jeder Bildpunkt bekommt den Unterschied zwischen seiner Lage jetzt und seiner Lage im Foto dazu.
+ * So wandern der weiche Mondrand, der Lichtschein neben der Sichel und ihre Spitzen mit, auch über grosse Lücken.
+ * Wo der Mond die Sonne freigibt, kommt die Sonnenoberfläche aus dem anderen Bild O (dort ist sie frei, weil der
+ * Mond auf seiner Bahn weiterzieht – so erscheinen auch Sonnenflecken an der richtigen Stelle), in der Helligkeit
+ * angeglichen.
+ */
+function modelFrom(N: Rgba, O: Rgba, fN: MovieFrame, fO: MovieFrame, off: { x: number; y: number; r: number }): Uint8ClampedArray<ArrayBuffer> {
+  const sN = fN.sun!, sO = fO.sun!;
+  const W = N.width, H = N.height;
+  const out = new Uint8ClampedArray(N.data);
+  const MN = sunModel(N, sN, fN.moon!), MO = sunModel(O, sO, fO.moon!);
+  // Mond, wie er in den Fotos aussieht. Zu dieser Zeit steht er um den Weg weiter, den die Bahn angibt – in der
+  // Grösse des Grundbilds (wie stark der Lichtschein den Mond anfrisst, hängt von der Belichtung des Fotos ab).
+  const mN = MN.moon, mO = MO.moon;
+  const mT = { cx: mN.cx + off.x - (fN.moon!.cx - sN.cx), cy: mN.cy + off.y - (fN.moon!.cy - sN.cy), r: mN.r };
+  // Punkt im Grundbild → Punkt im anderen Bild (dieselbe Stelle der Sonnenscheibe)
+  const sx = sO.cx - sN.cx, sy = sO.cy - sN.cy;
+  const omx = mO.cx - sx, omy = mO.cy - sy; // Mond des anderen Bildes in Koordinaten des Grundbilds
+  // weicher Rand wie der Sonnenrand im Bild (20–80 % über limbWidth → linearer Übergang über limbWidth / 0.6)
+  const ramp = Math.max(1, (fN.limbWidth ?? fO.limbWidth ?? 1.2) / 0.6);
+  const cov = (d: number, r: number) => clamp01((r - d) / ramp + 0.5);
+  // Helligkeit der Sonne angleichen (freie Sonne in beiden Bildern)
+  const rS = sN.r;
+  const sunN = [0, 0, 0], sunO = [0, 0, 0];
+  const bx0 = Math.max(0, Math.floor(sN.cx - rS)), bx1 = Math.min(W - 1, Math.ceil(sN.cx + rS));
+  const by0 = Math.max(0, Math.floor(sN.cy - rS)), by1 = Math.min(H - 1, Math.ceil(sN.cy + rS));
+  for (let y = by0; y <= by1; y += 3)
+    for (let x = bx0; x <= bx1; x += 3) {
+      if (Math.hypot(x - sN.cx, y - sN.cy) > rS - 2 * ramp) continue;
+      if (cov(Math.hypot(x - mN.cx, y - mN.cy), mN.r + ramp) > 0 || cov(Math.hypot(x - omx, y - omy), mO.r + ramp) > 0) continue;
+      const i = (y * W + x) * 4;
+      for (let c = 0; c < 3; c++) { sunN[c] += N.data[i + c]; sunO[c] += bilinear(O, x + sx, y + sy, c); }
+    }
+  const gain = [0, 1, 2].map((c) => (sunO[c] > 0 ? Math.min(2, Math.max(0.5, sunN[c] / sunO[c])) : 1));
+
+  const tipsT = hornTips(sN, mT);
+  const sOc = { cx: sO.cx, cy: sO.cy, r: sO.r }, tipsO = hornTips(sO, mO);
+  // betroffen: der Mond jetzt und im Grundbild samt Lichtschein in ihrer Nähe; nach aussen läuft die Änderung aus
+  const reach = 0.7 * rS, fadeFrom = 0.45 * rS;
+  const zone = Math.max(3 * ramp, 6);
+  const rSafe = Math.min(sN.r, sO.r) - 3 * ramp;
+  const R = Math.max(mT.r, mN.r) + reach;
+  const x0 = Math.max(0, Math.floor(Math.min(mT.cx, mN.cx) - R)), x1 = Math.min(W - 1, Math.ceil(Math.max(mT.cx, mN.cx) + R));
+  const y0 = Math.max(0, Math.floor(Math.min(mT.cy, mN.cy) - R)), y1 = Math.min(H - 1, Math.ceil(Math.max(mT.cy, mN.cy) + R));
+  const vT = new Float32Array(3), vN = new Float32Array(3), vOt = new Float32Array(3), vOo = new Float32Array(3);
+  for (let y = y0; y <= y1; y++)
+    for (let x = x0; x <= x1; x++) {
+      const dmN = Math.hypot(x - mN.cx, y - mN.cy), dmT = Math.hypot(x - mT.cx, y - mT.cy);
+      const far = Math.min(dmN - mN.r, dmT - mT.r);
+      if (far >= reach) continue;
+      const fade = far <= fadeFrom ? 1 : 1 - smooth((far - fadeFrom) / (reach - fadeFrom));
+      const p = y * W + x, i = p * 4;
+      const dT = crescentField(x, y, sN, mT, tipsT, MN.tau), mixT = fieldMix;
+      const dN = MN.d[p], mixN = MN.mix[p] / 255;
+      if (Math.abs(dT - dN) < 0.02 && Math.abs(mixT - mixN) < 0.01) continue;
+      modelValue(MN, dT, mixT, vT);
+      modelValue(MN, dN, mixN, vN);
+      const dS = Math.hypot(x - sN.cx, y - sN.cy);
+      // Am früheren Mondrand (und am Sonnenrand, den jetzt der Mond verdeckt) passt das Modell nie auf den Bildpunkt
+      // genau – der Rest bliebe als feine Linie stehen. Dort gilt, wenn sich die Lage geändert hat, nur das Modell.
+      const changed = smooth(Math.abs(dT - dN) / (2 * ramp));
+      const atOldMoon = clamp01(1.5 - Math.abs(dmN - mN.r) / zone) * cov(dS, rS + ramp);
+      const atOldLimb = clamp01(1.5 - Math.abs(dS - rS) / zone) * cov(dmT, mT.r + ramp) * (1 - cov(dmN, mN.r + ramp));
+      // Ebenso, wo sich die Helligkeit stark ändert (Sonne wird Mond oder umgekehrt): Was der Bildpunkt im Foto vom
+      // Modell abwich (Farbsaum, Körnung des Lichtscheins), gehört zur alten Lage und würde sonst mitgenommen.
+      // Nur in und an der sichtbaren Sonne – im Lichtschein weiter draussen bleibt das Foto mit seiner Körnung.
+      const big = smooth((Math.max(Math.abs(vT[0] - vN[0]), Math.abs(vT[1] - vN[1]), Math.abs(vT[2] - vN[2])) - 30) / 60) * smooth((dT + zone) / zone);
+      const kappa = fade * Math.max(changed * Math.max(atOldMoon, atOldLimb), big);
+      // frei gewordene Sonne: im Grundbild stand der Mond davor, jetzt nicht mehr – und im anderen Bild auch nicht.
+      // Nur sicher innerhalb beider Sonnenscheiben (überstrahlt ist die Sonne in einem der Bilder oft grösser).
+      const rho = fade * clamp01(cov(dmN, mN.r) - cov(dmT, mT.r)) * cov(dS, rSafe) * (1 - cov(Math.hypot(x - omx, y - omy), mO.r + ramp));
+      if (rho > 0) {
+        const dO = crescentField(x + sx, y + sy, sOc, mO, tipsO, MO.tau), mixO = fieldMix;
+        modelValue(MO, dT, mixT, vOt);
+        modelValue(MO, dO, mixO, vOo);
+      }
+      for (let c = 0; c < 3; c++) {
+        // heller: Unterschied dazuzählen; dunkler: im Verhältnis abdunkeln (der Lichtschein ist selten ringsum
+        // gleich hell – abgezogen würde er an schwachen Stellen schwarz, an hellen bliebe ein Rest)
+        const n = N.data[i + c];
+        let v = n + fade * ((vT[c] >= vN[c] ? n + vT[c] - vN[c] : (n * vT[c]) / Math.max(1, vN[c])) - n);
+        if (kappa > 0) v += kappa * (vT[c] - v);
+        if (rho > 0) v = (1 - rho) * v + rho * gain[c] * (bilinear(O, x + sx, y + sy, c) + vOt[c] - vOo[c]);
+        out[i + c] = v;
       }
     }
   return out;

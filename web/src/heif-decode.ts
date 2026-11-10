@@ -17,7 +17,8 @@ async function tileData(file: Blob, l: HeifLayout): Promise<Uint8Array[]> {
   return Promise.all(l.tiles.map((t) => heifBytes(file, t.extents)));
 }
 
-export async function decodeHeif(file: Blob): Promise<{ width: number; height: number; rgba: Uint8ClampedArray }> {
+/** HEIC-Foto als Zeichenfläche (fertig gedreht) */
+export async function decodeHeifCanvas(file: Blob): Promise<OffscreenCanvas> {
   const l = await readHeif(file);
   if (!l) throw new Error(msg("heicUnsupported"));
   if (typeof VideoDecoder === "undefined") throw new Error(msg("heicNoDecoder"));
@@ -74,6 +75,11 @@ export async function decodeHeif(file: Blob): Promise<{ width: number; height: n
     canvas = next;
     g = n;
   }
-  const img = g.getImageData(0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+export async function decodeHeif(file: Blob): Promise<{ width: number; height: number; rgba: Uint8ClampedArray }> {
+  const canvas = await decodeHeifCanvas(file);
+  const img = canvas.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, canvas.width, canvas.height);
   return { width: img.width, height: img.height, rgba: img.data };
 }

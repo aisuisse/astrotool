@@ -4,14 +4,14 @@ import { analyseFrame, colouriseOutput, outputColorId, outputSize, processSource
 import { hasTransform, transformedSize } from "./engine/transform";
 import { movieMeta } from "./engine/eclipsemovie";
 import { colorName, SerReader, SerWriter, type Frame } from "./engine/ser";
-import { FitsCubeSource, ImageSequenceSource, JoinedSource, serSource, type FrameSource, type ImageDecoder } from "./engine/source";
+import { FitsCubeSource, ImageSequenceSource, JoinedSource, serSource, type FrameSource, type ImageDecoder, type ImagePart } from "./engine/source";
 import { AviSource } from "./engine/avi";
 import { RAW_EXT, rawPreview } from "./engine/raw";
 import { decodeFits, FITS_EXT, fitsBaseName, isFits } from "./engine/fits";
 import { decodeRawData, rawUnsupported, whiteBalanceFrom } from "./engine/rawdata";
 import { MediaVideoSource } from "./video";
 import { isHeif } from "./engine/heif";
-import { decodeHeif } from "./heif-decode";
+import { decodeHeifCanvas } from "./heif-decode";
 import { ZipWriter } from "./engine/zip";
 import { calibratedSource, decodeMaster, encodeMaster, masterStats, MasterBuilder, type Calibration, type Master } from "./engine/calibrate";
 import { FileSink, MemorySink, type ByteSink, type WritableFile } from "./engine/sink";
@@ -195,6 +195,7 @@ async function openVideo(f: File, bigEndian: boolean): Promise<{ src: FrameSourc
  * als eine Serie (PIPP -join).
  */
 async function openFiles(files: File[], rawMode: "raw" | "preview", bigEndian = false, join = false, mainCamera = false) {
+  dropPicture();
   const dec = makeDecoder(rawMode);
   if (join && files.length > 1 && files.every((f) => VIDEO_EXT.test(f.name))) {
     const parts: { src: FrameSource; name: string }[] = [];
@@ -332,10 +333,17 @@ const nativeHevc: NativeHevc = {
 /** Zähler der Öffnen-Aufträge: Nur das zuletzt angeforderte Öffnen gilt (schnelles Umschalten, neue Dateien). */
 let openSeq = 0;
 
-async function rawJpeg(blob: Blob) {
-  const p = await rawPreview(blob);
-  if (!p) throw new Error(msg("rawNoPreview"));
-  return decodeImage(blob.slice(p.offset, p.offset + p.length, "image/jpeg"));
+/** eingebettetes JPEG je RAW-Datei (derselbe Blob bei jedem Aufruf – für den Zwischenspeicher der Teilansichten) */
+const rawJpegBlobs = new WeakMap<Blob, Blob>();
+async function rawJpeg(blob: Blob, part?: ImagePart) {
+  let jpg = rawJpegBlobs.get(blob);
+  if (!jpg) {
+    const p = await rawPreview(blob);
+    if (!p) throw new Error(msg("rawNoPreview"));
+    jpg = blob.slice(p.offset, p.offset + p.length, "image/jpeg");
+    rawJpegBlobs.set(blob, jpg);
+  }
+  return decodeImage(jpg, false, part);
 }
 
 /**
@@ -345,14 +353,14 @@ async function rawJpeg(blob: Blob) {
 function makeDecoder(mode: "raw" | "preview") {
   // hint: komprimiertes CR3/RAF ohne lesbare Sensordaten → Hinweis „in DNG umwandeln“
   const state: { wb: [number, number, number] | null | undefined; format: string; hint: string | null } = { wb: undefined, format: "", hint: null };
-  const decode: ImageDecoder = async (blob, raw) => {
+  const decode: ImageDecoder = async (blob, raw, part) => {
     if (!raw && (await isFits(blob))) {
       // FITS: lineare Sensordaten wie bei RAW (grau, Bayer oder Farbe, 8/16 bit)
       const frame = await decodeFits(blob);
       state.format = "FITS";
       return { width: frame.width, height: frame.height, frame };
     }
-    if (!raw) return decodeImage(blob);
+    if (!raw) return decodeImage(blob, false, part);
     if (mode === "raw") {
       if (state.wb === undefined) {
         // erstes Bild der Serie: Weissabgleich der Kamera oder aus dem Vergleich mit dem Kamerabild
@@ -368,37 +376,72 @@ function makeDecoder(mode: "raw" | "preview") {
       if (r) return { width: r.frame.width, height: r.frame.height, frame: r.frame };
     }
     state.format = state.format || "JPEG";
-    return rawJpeg(blob);
+    return rawJpeg(blob, part);
   };
+  // Teilansichten: nur, wenn die Serie aus Bildern (nicht Sensordaten) besteht – das prüft die Quelle
+  decode.parts = true;
   return { decode, state };
 }
 
-const decodeImage: ImageDecoder = async (blob) => {
+type Picture = ImageBitmap | OffscreenCanvas;
+
+/** Foto dekodieren (noch ohne die Bildpunkte auszulesen) */
+async function loadPicture(blob: Blob): Promise<Picture> {
   // HEIC (iPhone): Das liest der Browser nicht selbst – Kacheln mit dem HEVC-Dekoder des Systems dekodieren
-  let heicError: unknown = null;
   if (isHeif(new Uint8Array(await blob.slice(0, 64).arrayBuffer()))) {
     try {
-      return await decodeHeif(blob);
+      return await decodeHeifCanvas(blob);
     } catch (e) {
-      heicError = e; // macOS (WebKit) liest HEIC selbst – unten versuchen, sonst diese Meldung
+      // macOS (WebKit) liest HEIC selbst – sonst gilt die Meldung von oben
+      try {
+        return await createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+      } catch {
+        throw e;
+      }
     }
   }
-  if (heicError) {
-    try {
-      const b = await createImageBitmap(blob);
-      b.close();
-    } catch {
-      throw heicError;
+  return createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+}
+
+/**
+ * Zuletzt dekodiertes Foto – nur für Teilansichten: Die schnelle Analyse holt vom selben Foto erst die
+ * verkleinerte Ansicht, dann den Ausschnitt; dekodiert wird es dafür nur einmal.
+ */
+let lastPicture: { blob: Blob; pic: Picture } | null = null;
+function dropPicture() {
+  if (lastPicture && "close" in lastPicture.pic) lastPicture.pic.close();
+  lastPicture = null;
+}
+
+const decodeImage: ImageDecoder = async (blob, _raw, part) => {
+  let pic: Picture;
+  if (lastPicture?.blob === blob) pic = lastPicture.pic;
+  else {
+    pic = await loadPicture(blob);
+    if (part) {
+      dropPicture();
+      lastPicture = { blob, pic };
     }
   }
-  const bmp = await createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
-  const c = new OffscreenCanvas(bmp.width, bmp.height);
+  const fw = pic.width, fh = pic.height;
+  let sx = 0, sy = 0, sw = fw, sh = fh, ow = fw, oh = fh;
+  if (part && "scale" in part) {
+    ow = Math.max(1, Math.round(fw / part.scale));
+    oh = Math.max(1, Math.round(fh / part.scale));
+  } else if (part) {
+    ({ x: sx, y: sy, w: sw, h: sh } = part);
+    ow = sw;
+    oh = sh;
+  }
+  const c = new OffscreenCanvas(ow, oh);
   const g = c.getContext("2d", { willReadFrequently: true })!;
-  g.drawImage(bmp, 0, 0);
-  bmp.close();
-  const img = g.getImageData(0, 0, c.width, c.height);
-  return { width: img.width, height: img.height, rgba: img.data };
+  g.imageSmoothingQuality = "medium";
+  g.drawImage(pic, sx, sy, sw, sh, 0, 0, ow, oh);
+  if (pic !== lastPicture?.pic && "close" in pic) pic.close();
+  const img = g.getImageData(0, 0, ow, oh);
+  return { width: ow, height: oh, rgba: img.data, fullWidth: fw, fullHeight: fh };
 };
+decodeImage.parts = true;
 
 /** .NET-Ticks (100 ns seit 0001-01-01) → ISO-Datum */
 function ticksToIso(t: bigint | undefined): string | null {

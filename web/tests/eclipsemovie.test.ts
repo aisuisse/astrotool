@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blendFrames, canSynth, fillMoonTrack, limbWidth, planMovie, synthFrame, type MovieFrame, type Rgba } from "../src/engine/eclipsemovie";
+import { blendFrames, canSynth, fillMoonTrack, limbWidth, planMovie, refineMoon, synthFrame, type MovieFrame, type Rgba } from "../src/engine/eclipsemovie";
 import { autoCropSize, defaultOptions, detect, judge, rejectBlurred, rejectIsolatedRadii, type FrameResult } from "../src/engine/pipeline";
 import type { Lum } from "../src/engine/image";
 
@@ -132,6 +132,74 @@ describe("Gerechnete Zwischenbilder", () => {
     const A = rgba(W, W, scene(150)), B = rgba(W, W, scene(110));
     expect(synthFrame(A, B, meta(0, 150), meta(60, 110), 0)).toEqual(A.data);
     expect(synthFrame(A, B, meta(0, 150), meta(60, 110), 1)).toEqual(B.data);
+  });
+});
+
+describe("Gerechnete Zwischenbilder über grosse Lücken", () => {
+  // überstrahlte Sonne mit weichem Rand und Lichtschein, der nach aussen abfällt – auch vor dem Mond
+  const W = 240, sun = { cx: 110, cy: 120, r: 70 };
+  const scene = (mx: number, glow = 0.5) => {
+    // Rand der sichtbaren Sonne als Punkte: Sonnenrand, wo ihn der Mond nicht verdeckt, und Mondrand vor der Sonne
+    const edge: number[] = [];
+    for (let k = 0; k < 1440; k++) {
+      const a = (k * Math.PI) / 720, c = Math.cos(a), si = Math.sin(a);
+      const sx = sun.cx + sun.r * c, sy = sun.cy + sun.r * si;
+      if (Math.hypot(sx - mx, sy - 120) >= 72) edge.push(sx, sy);
+      const qx = mx + 72 * c, qy = 120 + 72 * si;
+      if (Math.hypot(qx - sun.cx, qy - sun.cy) <= sun.r) edge.push(qx, qy);
+    }
+    return (x: number, y: number) => {
+      if (Math.hypot(x - sun.cx, y - sun.cy) <= sun.r && Math.hypot(x - mx, y - 120) >= 72) return 1;
+      // Lichtschein: fällt mit dem Abstand zur sichtbaren Sonne ab
+      let d2 = Infinity;
+      for (let i = 0; i < edge.length; i += 2) d2 = Math.min(d2, (x - edge[i]) ** 2 + (y - edge[i + 1]) ** 2);
+      return Math.min(1, 0.03 + glow * Math.exp(-Math.sqrt(d2) / 14));
+    };
+  };
+  const meta = (t: number, mx: number): MovieFrame => ({ t, kind: "sun", sun, moon: { cx: mx, cy: 120, r: 72 }, limbWidth: 3 });
+  const err = (d: Uint8ClampedArray, want: Rgba) => { let s = 0; for (let i = 0; i < d.length; i += 4) s += Math.abs(d[i] - want.data[i]); return s / (W * W); };
+
+  it("Mond weit gewandert: Sichel, Rand und Lichtschein stimmen – keine dunklen Flecken, kein Rest des alten Rands", () => {
+    // Mond wandert um 70 px (ein Sonnenradius) – weit über der Grenze für das Modell-Verfahren
+    const A = rgba(W, W, scene(230)), B = rgba(W, W, scene(160));
+    for (const [w, mx] of [[0.25, 212.5], [0.5, 195], [0.75, 177.5]]) {
+      const want = rgba(W, W, scene(mx));
+      const got = synthFrame(A, B, meta(0, 230), meta(1200, 160), w);
+      expect(err(got, want)).toBeLessThan(3);
+      expect(err(blendFrames(A, B, w), want)).toBeGreaterThan(2.5 * err(got, want));
+      // grösste Abweichung an einer Stelle (Mittel über 5 × 5): keine Flecken – ein Rand, der um 1 px versetzt ist, ergibt etwa 50
+      let worst = 0;
+      for (let y = 4; y < W - 4; y += 3)
+        for (let x = 4; x < W - 4; x += 3) {
+          let s = 0;
+          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) s += got[((y + dy) * W + x + dx) * 4] - want.data[((y + dy) * W + x + dx) * 4];
+          worst = Math.max(worst, Math.abs(s) / 25);
+        }
+      expect(worst).toBeLessThan(60);
+    }
+  });
+
+  it("verschieden belichtete Fotos: jede Hälfte der Lücke in der Helligkeit ihres Fotos", () => {
+    const A = rgba(W, W, scene(230, 0.2)), B = rgba(W, W, scene(160, 0.8));
+    const early = synthFrame(A, B, meta(0, 230), meta(1200, 160), 0.2), late = synthFrame(A, B, meta(0, 230), meta(1200, 160), 0.8);
+    // Himmel links neben der Sonne (weit weg vom Mond): unverändert wie im jeweiligen Foto
+    const i = (120 * W + 25) * 4;
+    expect(early[i]).toBe(A.data[i]);
+    expect(late[i]).toBe(B.data[i]);
+  });
+
+  it("Mondrand am Foto nachmessen: überstrahlt sitzt der sichtbare Rand neben der Messung", () => {
+    // sichtbarer Mond: Radius 64 statt 72, um 5 px verschoben
+    const N = rgba(W, W, (x, y) => {
+      const ds = Math.hypot(x - sun.cx, y - sun.cy) - sun.r, dm = 64 - Math.hypot(x - 165, y - 123);
+      return Math.max(ds, dm) <= 0 ? 1 : 0.05;
+    });
+    const m = refineMoon(N, sun, { cx: 160, cy: 120, r: 72 });
+    expect(Math.abs(m.r - 64)).toBeLessThan(2.5);
+    expect(Math.hypot(m.cx - 165, m.cy - 123)).toBeLessThan(3);
+    // kein Rand zu finden (Mond ausserhalb der Sonne): Vorgabe bleibt
+    const far = { cx: 400, cy: 120, r: 72 };
+    expect(refineMoon(N, sun, far)).toEqual(far);
   });
 });
 
