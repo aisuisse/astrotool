@@ -2,7 +2,7 @@
 
 Astrotool für Windows 10/11 ist eine Tauri-2-App: dieselbe Oberfläche wie die Web-Version (`web/src`) in einem nativen Fenster mit WebView2 (in Windows 11 enthalten). Nativ ergänzt wird nur, was eine Webseite nicht darf, z. B. Hilfsprogramme wie FFmpeg per winget installieren (Menü „Tools & Setup“).
 
-**Für Anwender:** Installer `Astrotool_<version>_x64-setup.exe` ausführen – keine weiteren Programme nötig. Installation pro Benutzer, ohne Administratorrechte. Installer auf Englisch oder Deutsch.
+**Für Anwender:** Installer `Astrotool_<version>_x64-setup.exe` ausführen – keine weiteren Programme nötig. Installation pro Benutzer, ohne Administratorrechte. Installer auf Englisch, Deutsch, Spanisch, Portugiesisch, Italienisch oder Bulgarisch (seit 0.37).
 
 ## Bauen (nur Entwicklungsrechner)
 

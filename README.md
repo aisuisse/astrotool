@@ -21,7 +21,8 @@ Astrotool prepares videos and image series for stacking software such as AutoSta
 - **Time-lapses** that are ready to share – MP4 H.265/HEVC or H.264 (plays in WhatsApp and Google Photos and is filed under the capture date), WebM or GIF, with capture time and title burned in.
 - **Every common input** – SER, AVI (SharpCap, FireCapture & co., also > 4 GB), MP4/MOV/MKV/WebM, JPG/PNG/TIFF, iPhone HEIC and camera RAW (sensor data from DNG – also Fujifilm X-Trans – Canon CR2, Sony ARW, Nikon NEF, Samsung SRW and uncompressed Fujifilm RAF; full-size embedded image for CR3, compressed RAF and others, with a hint to convert them to DNG). No extra software needed.
 - **Built-in viewer** (an independent re-implementation of the classic SER Player idea): play forwards/backwards at 30 fps, set markers, debayer, gain, gamma, colour balance, histogram, save a range or hand it to processing.
-- **Made for the night** – English and German UI, red night mode, PIPP option files (`.pof`) can be imported.
+- **Six languages (0.37)** – English, German, Spanish, Portuguese, Italian and Bulgarian, in the app, on the website and in the Windows installer. The first start follows the language of your system or browser.
+- **Made for the night** – red night mode, PIPP option files (`.pof`) can be imported.
 
 | Planet: preview and result | Batch with WinJUPOS file names |
 |---|---|
@@ -78,7 +79,8 @@ The app is not code-signed yet, so Windows SmartScreen may show *"Windows protec
 | Eclipse phase montage: selected frames as an arc (path of the sun), row or grid, totality in the middle, time under each disc, one large PNG | – (new) | ✅ |
 | Time-lapse: HEVC, H.264, WebM, GIF; frame rate, hold last frame, ping-pong, time and title overlay | `-anim_fwd -anim_rev -anim_fwd_lf_rep= -fps_rate= -gif` | ✅ |
 | Import PIPP option files (`.pof`) | – | ✅ |
-| Viewer (SER Player style), night mode, English/German UI, list of recently opened files (0.28) | – | ✅ |
+| Viewer (SER Player style), night mode, list of recently opened files (0.28) | – | ✅ |
+| User interface in English, German, Spanish, Portuguese, Italian and Bulgarian (0.37); PIPP: English only | English | ✅ |
 | Dark/flat calibration: masters from SER, video, image or RAW series (average without the highest and lowest value), flat dark/bias, colour-neutral flats for Bayer data; applied before cropping and debayering; darks scaled to a different exposure, masters saved and loaded as FITS (0.28) | dark/flat | ✅ |
 | Reading FITS: single images (grey, Bayer, colour; 8/16/32 bit, float) with time and exposure from the header – also as darks/flats; cubes with many frames in one file (0.25) open like a video; compressed FITS (`.fits.fz`: Rice, GZIP, quantised float, as from fpack and solar observatories such as NSO/GONG) (0.30) | FITS | ✅ |
 | Fujifilm X-Trans sensor data (uncompressed RAF, DNG) with own colour reconstruction; compressed CR3/RAF: Canon/Fuji do not publish the format – convert with the free Adobe DNG Converter | – | ✅ |

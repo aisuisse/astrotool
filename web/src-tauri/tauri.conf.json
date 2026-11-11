@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Astrotool",
-  "version": "0.36.0",
+  "version": "0.37.0",
   "identifier": "ch.aisuisse.astrotool",
   "build": {
     "frontendDist": "../dist",
@@ -50,7 +50,13 @@
       "nsis": {
         "languages": [
           "English",
-          "German"
+          "German",
+          "SpanishInternational",
+          "Spanish",
+          "PortugueseBR",
+          "Portuguese",
+          "Italian",
+          "Bulgarian"
         ],
         "displayLanguageSelector": true,
         "installMode": "currentUser"

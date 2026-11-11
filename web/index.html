@@ -48,7 +48,7 @@
           <input id="pof" type="file" accept=".pof" hidden />
         </label>
         <button id="toolsBtn" class="btn" data-i18n="btn.tools">Tools &amp; setup</button>
-        <button id="lang" class="btn" lang="de" title="Sprache: Deutsch" data-i18n="btn.lang" data-i18n-title="btn.langTitle">Deutsch</button>
+        <select id="lang" class="btn langSelect" title="Language" aria-label="Language" data-i18n-title="btn.langTitle"></select>
         <button id="aboutBtn" class="btn icon" title="About Astrotool" data-i18n-title="btn.about" aria-label="About Astrotool">ⓘ</button>
         <button id="night" class="btn icon" title="Night mode (red light)" data-i18n-title="btn.night" aria-pressed="false">☾</button>
       </div>
@@ -93,7 +93,7 @@
           </div>
           <strong id="easyStep"></strong>
           <div class="progress"><div id="easyBar"></div><span id="easyCount"></span></div>
-          <div id="liveStrip" class="liveStrip" aria-hidden="true"></div>
+          <div id="liveStrip" class="liveStrip" dir="ltr" aria-hidden="true"></div>
           <button id="easyCancel" class="btn" data-i18n="btn.cancel">Cancel</button>
         </div>
         <div id="easyResult" class="easyResult" hidden></div>
@@ -118,11 +118,11 @@
 
         <section id="player" class="viewer" hidden>
           <div id="playStage" class="view main playStage"><canvas id="playCanvas"></canvas></div>
-          <div class="playBar">
+          <div class="playBar" dir="ltr">
             <input id="playFrame" type="range" min="0" value="0" aria-label="Frame" />
             <div id="markerBar" class="markerBar"><span id="markerRange"></span></div>
           </div>
-          <div class="transport">
+          <div class="transport" dir="ltr">
             <button id="pStart" class="btn icon" title="Start marker" data-i18n-title="play.toStart">⏮</button>
             <button id="pBack" class="btn icon" title="Previous frame" data-i18n-title="btn.prev">‹</button>
             <button id="pPlay" class="btn primary icon wide" title="Play / pause (Space)" data-i18n-title="play.playPause">▶</button>

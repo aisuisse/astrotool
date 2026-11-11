@@ -77,7 +77,7 @@ Tests: `npm test` · Produktions-Build: `npm run build` (Ausgabe in `web/dist`, 
 | **Volle Tiefe:** 16-bit-PNG, 16-bit-TIFF und FITS (Aufnahmezeit, Belichtung, Bayer-Muster im Kopf) für Siril, PixInsight, DeepSkyStacker | TIFF, FITS | ✅ 0.16 |
 | PIPP-Optionsdatei `.pof` importieren (Teilmenge, Format an echten Dateien bestätigt) | – | ✅ |
 | Zeitraffer als **MP4 H.265/HEVC** (Standard, teilbar in WhatsApp und Google Fotos), MP4 H.264, WebM oder GIF – Bildrate, Standbild am Ende, hin und zurück, Aufnahmezeit und Titel eingeblendet | `-anim_fwd -anim_rev -anim_fwd_lf_rep= -fps_rate= -gif` | ✅ |
-| Oberfläche Englisch (Standard) / Deutsch umschaltbar | – | ✅ |
+| Oberfläche in sechs Sprachen: Englisch (Standard), Deutsch, Spanisch, Portugiesisch, Italienisch, Bulgarisch – in App, Webseite und Windows-Installer; beim ersten Start gilt die Sprache des Systems bzw. Browsers | nur Englisch | ✅ 0.37 (neue Sprachen maschinell übersetzt, Durchsicht durch Muttersprachler steht aus) |
 | Menü „Tools & Setup“: Browser-Check, Installationsbefehle, Setup-Skript für Windows (`setup-windows.ps1`, winget) | – | ✅ |
 | Defekte oder fremde Bilder in einer Serie werden übersprungen statt abzubrechen | – | ✅ |
 | **Farbkameras (Debayer)** in der Verarbeitung: PNG und Zeitraffer farbig, SER wahlweise farbig oder als Bayer-Rohdaten (für AutoStakkert!); Erkennung und Schärfemass auf einem Helligkeitsbild ohne Bayer-Schachbrett | `-db -db= -pb` | ✅ |

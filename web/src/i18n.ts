@@ -1,11 +1,21 @@
-// Sprachen: Englisch (Standard) und Deutsch.
+// Sprachen: Englisch (Standard), Deutsch, Spanisch, Portugiesisch, Italienisch, Bulgarisch.
+// Englisch und Deutsch stehen hier, die übrigen je in einer Datei unter ./lang (gleiche Schlüssel wie `en`).
 // Keine DOM-Abhängigkeit, damit auch der Worker Meldungen übersetzen kann.
 //
 // Engine und Worker liefern Meldungen sprachneutral als "@code|arg0|arg1" (siehe msg()).
 // Die Oberfläche übersetzt sie mit tr().
 
-export type Lang = "en" | "de";
-export const LANGS: Lang[] = ["en", "de"];
+import { bg } from "./lang/bg";
+import { es } from "./lang/es";
+import { it } from "./lang/it";
+import { pt } from "./lang/pt";
+
+export type Lang = "en" | "de" | "es" | "pt" | "it" | "bg";
+export const LANGS: Lang[] = ["en", "de", "es", "pt", "it", "bg"];
+/** Name jeder Sprache in der Sprache selbst (für die Auswahl) */
+export const LANG_NAMES: Record<Lang, string> = { en: "English", de: "Deutsch", es: "Español", pt: "Português", it: "Italiano", bg: "Български" };
+/** Schreibweise von Zahlen und Datum */
+export const LOCALES: Record<Lang, string> = { en: "en-GB", de: "de-CH", es: "es-ES", pt: "pt-PT", it: "it-IT", bg: "bg-BG" };
 
 const en = {
   "app.tagline": "Pre-processing for planets, Moon, Sun & eclipses",
@@ -19,8 +29,7 @@ const en = {
   "recent.missing": "Could not open the file again (moved, deleted or access refused).",
   "btn.importPof": "Import PIPP options",
   "btn.night": "Night mode (red light)",
-  "btn.lang": "Deutsch",
-  "btn.langTitle": "Sprache: Deutsch",
+  "btn.langTitle": "Language",
   "btn.prev": "Previous frame",
   "btn.next": "Next frame",
   "btn.cancel": "Cancel",
@@ -445,8 +454,7 @@ const de: Record<Key, string> = {
   "recent.missing": "Die Datei liess sich nicht wieder öffnen (verschoben, gelöscht oder Zugriff verweigert).",
   "btn.importPof": "PIPP-Optionen importieren",
   "btn.night": "Nachtmodus (rotes Licht)",
-  "btn.lang": "English",
-  "btn.langTitle": "Language: English",
+  "btn.langTitle": "Sprache",
   "btn.prev": "Vorheriges Frame",
   "btn.next": "Nächstes Frame",
   "btn.cancel": "Abbrechen",
@@ -856,7 +864,7 @@ const de: Record<Key, string> = {
   "msg.unreadable": "Bild nicht lesbar",
 };
 
-export const dictionaries: Record<Lang, Record<Key, string>> = { en, de };
+export const dictionaries: Record<Lang, Record<Key, string>> = { en, de, es, pt, it, bg };
 export type MsgCode = { [K in Key]: K extends `msg.${infer C}` ? C : never }[Key];
 
 /** Sprachneutrale Meldung für Engine/Worker: "@code|arg0|arg1". */
@@ -881,7 +889,19 @@ export function tr(lang: Lang, text: string | undefined): string {
 }
 
 export function isLang(v: unknown): v is Lang {
-  return v === "en" || v === "de";
+  return LANGS.includes(v as Lang);
+}
+
+/**
+ * Sprache für den ersten Besuch: die erste Sprache aus der Liste des Browsers, die es hier gibt
+ * ("pt-BR" → Portugiesisch); sonst Englisch.
+ */
+export function pickLang(preferred: readonly string[]): Lang {
+  for (const p of preferred) {
+    const code = p.toLowerCase().split(/[-_]/)[0];
+    if (isLang(code)) return code;
+  }
+  return "en";
 }
 
 export type I18nKey = Key;

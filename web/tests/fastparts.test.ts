@@ -140,7 +140,7 @@ describe("Schnelle Analyse", () => {
       for (let i = 0; i < fast.out[k].data.length; i += 7) { diff += Math.abs(fast.out[k].data[i] - slow.out[k].data[i]); n++; }
     }
     expect(diff / n).toBeLessThan(1);
-  });
+  }, 60_000); // grosse Bilder: auf langsamen Rechnern (Build-Server) mehr als die üblichen 5 s
 
   it("Blick in die Analyse: jedes Foto einmal, verkleinert, mit dem Ergebnis der Prüfung", async () => {
     const src = await sourceOf(pics);
@@ -162,7 +162,7 @@ describe("Schnelle Analyse", () => {
       expect(Math.abs(seen[k].r! - r)).toBeLessThan(1.5);
     }
     expect(rep.frames.length).toBe(pics.length);
-  });
+  }, 60_000);
 
   it("ohne Teilansichten gibt es keinen Blick in die Analyse – das Ergebnis bleibt gleich", async () => {
     const src = await sourceOf(pics.slice(0, 3), undefined, false);

@@ -187,17 +187,25 @@ try {
     return { ...r, about };
   });
 
-  await test("Sprache umschalten (EN ↔ DE)", async () => {
-    const before = await ev(`({ btn: document.getElementById('lang').innerText, run: document.getElementById('run').innerText })`);
-    await ev(`document.getElementById('lang').click(); true`);
-    await sleep(400);
-    const after = await ev(`({ btn: document.getElementById('lang').innerText, run: document.getElementById('run').innerText })`);
-    check(after.run !== before.run, "Beschriftung hat sich nicht geändert");
+  await test("Sprache wählen (Englisch, Deutsch, Spanisch, Portugiesisch, Italienisch, Bulgarisch)", async () => {
+    const pick = async (l) => {
+      await ev(`(() => { const s = document.getElementById('lang'); s.value = '${l}'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+      await sleep(300);
+      return ev(`({ html: document.documentElement.lang, shown: document.getElementById('lang').selectedOptions[0]?.textContent, run: document.getElementById('run').innerText, open: document.querySelector('[data-i18n="btn.open"]').innerText, saved: localStorage.getItem('astrotool-lang') })`);
+    };
+    const options = await ev(`[...document.getElementById('lang').options].map((o) => o.value)`);
+    check(options.join(",") === "en,de,es,pt,it,bg", `Sprachen in der Auswahl: ${options}`);
+    const seen = {};
+    for (const l of ["de", "es", "pt", "it", "bg", "en"]) {
+      const st = await pick(l);
+      check(st.html === l && st.saved === l, `${l}: ${JSON.stringify(st)}`);
+      seen[l] = st;
+    }
+    // jede Sprache beschriftet den Startknopf anders; Bulgarisch in kyrillischer Schrift
+    check(new Set(Object.values(seen).map((s) => s.run)).size === 6, `Startknopf: ${Object.values(seen).map((s) => s.run).join(" | ")}`);
+    check(/[а-я]/i.test(seen.bg.open) && seen.es.open === "Abrir" && seen.it.open === "Apri", `Öffnen: ${JSON.stringify([seen.bg.open, seen.es.open, seen.it.open])}`);
     // Englisch als Standard für den Rest des Tests
-    if (!/English|Englisch/.test(after.btn)) { /* ok */ }
-    const now = await ev(`document.documentElement.lang`);
-    if (now === "de") { await ev(`document.getElementById('lang').click(); true`); await sleep(300); }
-    return { before, after, end: await ev(`document.documentElement.lang`) };
+    return { options, seen, end: await ev(`document.documentElement.lang`) };
   });
 
   await test("Werkzeuge & Einrichtung (FFmpeg-Status nativ)", async () => {

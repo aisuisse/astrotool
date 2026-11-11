@@ -54,15 +54,17 @@ body {
 .brand svg { width: 26px; height: 26px; fill: none; stroke: var(--accent); stroke-width: 1.6; }
 .brand small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Sprachwahl in der Kopfzeile: sieht aus wie die Knöpfe daneben */
+.actions select.langSelect { width: auto; font: inherit; cursor: pointer; }
 .recentWrap { position: relative; }
 .recentMenu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 280px; max-width: min(520px, 90vw);
+  position: absolute; top: calc(100% + 4px); inset-inline-start: 0; z-index: 20; min-width: 280px; max-width: min(520px, 90vw);
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
 }
 .recentMenu .recentItem { display: flex; align-items: center; gap: 4px; }
 .recentMenu .recentOpen {
-  flex: 1; text-align: left; background: none; border: 0; color: var(--text); padding: 6px 8px; border-radius: 6px;
+  flex: 1; text-align: start; background: none; border: 0; color: var(--text); padding: 6px 8px; border-radius: 6px;
   cursor: pointer; font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .recentMenu .recentOpen:hover, .recentMenu .recentOpen:focus-visible { background: var(--surface-2); }
@@ -96,7 +98,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; pa
 .view { margin: 0; background: #000; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .view canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
 .view figcaption { display: flex; gap: 10px; align-items: center; padding: 6px 10px; background: var(--surface); color: var(--muted); font-size: 12px; }
-.legend::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 4px; border: 2px solid; vertical-align: -1px; }
+.legend::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-inline-end: 4px; border: 2px solid; vertical-align: -1px; }
 .legend.obj::before { border-color: var(--obj); }
 .legend.crop::before { border-color: var(--crop); }
 .legend.disc::before { border-color: var(--disc); border-radius: 50%; }
@@ -104,7 +106,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; pa
 .anchorRow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
 .anchorRow span { flex: 1 1 220px; }
 #inCanvas.drawAnchor { cursor: crosshair; touch-action: none; }
-.pill { margin-left: auto; padding: 1px 8px; border-radius: 99px; font-size: 12px; }
+.pill { margin-inline-start: auto; padding: 1px 8px; border-radius: 99px; font-size: 12px; }
 .pill.ok { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
 .pill.bad { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); }
 
@@ -137,9 +139,10 @@ input[type="number"], select {
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
 .card.disabled .grid { opacity: .4; pointer-events: none; }
 
-.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.seg button { flex: 1; background: transparent; color: var(--muted); border: 0; padding: 7px 4px; cursor: pointer; font: inherit; }
-.seg button + button { border-left: 1px solid var(--line); }
+/* Bei langen Wörtern (andere Sprachen) bricht die Reihe um; die Trennlinien liegen links und oben an jedem Knopf
+   und verschwinden am Rand hinter dem Rahmen. */
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; background: transparent; color: var(--muted); border: 0; padding: 7px 4px; cursor: pointer; font: inherit; box-shadow: -1px 0 0 var(--line), 0 -1px 0 var(--line); }
 .seg button.on { background: var(--surface-2); color: var(--text); font-weight: 600; }
 
 .run { display: flex; flex-direction: column; gap: 10px; }
@@ -207,14 +210,14 @@ table.tools a { color: var(--accent); }
 
 /* Stapel: mehrere Aufnahmen */
 .batch { display: grid; gap: 6px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line, #3334); border-radius: 8px; }
-.batch ol { margin: 6px 0 0; padding-left: 22px; max-height: 160px; overflow: auto; font-size: 0.85em; }
+.batch ol { margin: 6px 0 0; padding-inline-start: 22px; max-height: 160px; overflow: auto; font-size: 0.85em; }
 .batch li.cur { font-weight: 600; }
 .batchTable { width: 100%; border-collapse: collapse; font-size: 0.85em; margin: 6px 0; }
-.batchTable td, .batchTable th { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line, #3333); vertical-align: top; }
+.batchTable td, .batchTable th { text-align: start; padding: 3px 6px; border-bottom: 1px solid var(--line, #3333); vertical-align: top; }
 .batchTable td.bad { color: var(--bad, #d55); }
 
 /* ---------- Einfach-Modus ---------- */
-.uiSwitch { margin-right: 6px; }
+.uiSwitch { margin-inline-end: 6px; }
 body.easy main { grid-template-columns: minmax(0, 1fr); max-width: 860px; margin: 0 auto; }
 body.easy main > .stage, body.easy main > aside, body.easy .expertOnly { display: none !important; }
 .easy { display: flex; flex-direction: column; gap: 14px; }
@@ -247,7 +250,7 @@ body.easy.dragging .dropVeil { display: flex; }
 /* Live-Ansicht */
 .liveStage { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
 .liveStage canvas { display: block; width: 100%; height: clamp(200px, 46vh, 520px); }
-.liveBadge { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px); padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.62); color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.liveBadge { position: absolute; inset-inline-start: 10px; bottom: 10px; max-width: calc(100% - 20px); padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.62); color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .liveBadge:empty { display: none; }
 .liveBadge.ok::before { content: "✓ "; color: #58d68d; }
 .liveBadge.bad::before { content: "✗ "; color: #ff7b6b; }
@@ -280,7 +283,7 @@ a.btn { text-decoration: none; }
 .easyBusy .progress { position: relative; height: 22px; }
 .easyResult video, .easyResult img { width: 100%; max-height: 70vh; object-fit: contain; background: #000; border-radius: 6px; }
 .easyResult .row { display: flex; gap: 10px; flex-wrap: wrap; }
-.easyResult ul { margin: 0; padding-left: 20px; color: var(--muted); }
+.easyResult ul { margin: 0; padding-inline-start: 20px; color: var(--muted); }
 .easyResult details small { display: block; max-height: 240px; overflow: auto; }
 @media (max-width: 600px) {
   body.easy main { padding: 12px; }
@@ -290,9 +293,11 @@ a.btn { text-decoration: none; }
   .topbar { flex-wrap: wrap; gap: 8px; }
   /* Einfach-Modus am Handy: Zusatzprogramme sind Sache der Desktop-App – die Kopfzeile bleibt einzeilig */
   body.easy #toolsBtn { display: none; }
+  /* die Desktop-App holt man nicht am Handy – der Link steht weiter unten auf der Seite */
+  body.easy .actions a.webOnly { display: none; }
   body.easy .actions { gap: 6px; }
   body.easy .actions .btn { padding: 6px 9px; font-size: 13px; }
-  body.easy .uiSwitch { margin-right: 0; }
+  body.easy .uiSwitch { margin-inline-end: 0; }
   .easyKind { align-self: stretch; }
   .easyKind button { padding: 8px 6px; }
   #easy.isDrop h1 { font-size: 24px; }

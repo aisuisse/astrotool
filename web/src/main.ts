@@ -4,7 +4,7 @@ import { MIN_ANCHOR } from "./engine/surface";
 import { applyPof, parsePof } from "./engine/pof";
 import { defaultTimelapse, type TimelapseOptions } from "./engine/timelapse";
 import { defaultMontage, type MontageOptions } from "./engine/montage";
-import { dictionaries, isLang, t as translate, tr as translateMsg, type I18nKey, type Lang } from "./i18n";
+import { dictionaries, isLang, LANG_NAMES, LANGS, LOCALES, pickLang, t as translate, tr as translateMsg, type I18nKey, type Lang } from "./i18n";
 import { initTools, isDesktopApp } from "./tools";
 import { buildTimeline, drawSky, Hero, keepAwake, LiveView, type FilmThumb } from "./easy-live";
 import { initPlayer } from "./player";
@@ -22,9 +22,16 @@ let lang: Lang = "en";
 try {
   const saved = localStorage.getItem("astrotool-lang");
   if (isLang(saved)) lang = saved;
-  // erster Besuch: Sprache des Browsers (Deutsch, sonst Englisch)
-  else if ((navigator.languages?.[0] ?? navigator.language ?? "").toLowerCase().startsWith("de")) lang = "de";
+  // erster Besuch: Sprache des Browsers, wenn es sie hier gibt – sonst Englisch
+  else lang = pickLang(navigator.languages?.length ? navigator.languages : [navigator.language ?? ""]);
 } catch { /* ohne Speicher: Englisch */ }
+// Sprachwahl: jede Sprache unter ihrem eigenen Namen
+const langSelect = $<HTMLSelectElement>("lang");
+langSelect.replaceChildren(...LANGS.map((l) => {
+  const o = new Option(LANG_NAMES[l], l);
+  o.lang = l;
+  return o;
+}));
 const L = (key: I18nKey, ...args: (string | number)[]) => translate(lang, key, ...args);
 const M = (text: string | undefined) => translateMsg(lang, text);
 
@@ -36,7 +43,8 @@ function applyStatic() {
   document.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((el) => (el.title = L(el.dataset.i18nTitle as I18nKey)));
   document.querySelectorAll<HTMLInputElement>("[data-i18n-placeholder]").forEach((el) => (el.placeholder = L(el.dataset.i18nPlaceholder as I18nKey)));
   document.querySelector('meta[name="description"]')?.setAttribute("content", L("app.description"));
-  $("lang").setAttribute("lang", lang === "en" ? "de" : "en");
+  langSelect.value = lang;
+  langSelect.setAttribute("aria-label", L("btn.langTitle"));
 }
 
 function setLang(l: Lang) {
@@ -60,7 +68,7 @@ function setLang(l: Lang) {
   if (lastBatch && !busy) renderBatchResult();
   renderEasy();
 }
-$("lang").addEventListener("click", () => setLang(lang === "en" ? "de" : "en"));
+langSelect.addEventListener("change", () => { if (isLang(langSelect.value)) setLang(langSelect.value); });
 
 // ---------- Kalibrierung (Dark / Flat) ----------
 type CalState = { stats: Extract<FromWorker, { type: "calibrated" }>["stats"]; error?: string; loading?: boolean };
@@ -773,7 +781,7 @@ function colourLabel(id: number): string {
 }
 
 function renderInfo(i: FileInfo) {
-  const locale = lang === "de" ? "de-CH" : "en-GB";
+  const locale = LOCALES[lang];
   const rows: [string, string][] = [
     [L("info.size"), `${i.width} × ${i.height}`],
     [i.kind === "images" ? L("info.images") : L("info.frames"), i.frameCount.toLocaleString(locale)],
@@ -1262,7 +1270,7 @@ function renderEasy() {
   $("easyResult").hidden = !lastEasy || running;
   if (!info) $("easyDropTitle").textContent = L(touchOnly ? "easy.dropTitle.touch" : "easy.dropTitle");
   if (info && !running) {
-    const locale = lang === "de" ? "de-CH" : "en-GB";
+    const locale = LOCALES[lang];
     const rows: [string, string][] = [[L("easy.photos"), info.frameCount.toLocaleString(locale)]];
     const ts = (s: string) => localIso(s, info!.clockShiftMs).replace("T", " ").slice(0, 16);
     if (info.firstTimestamp && info.lastTimestamp) rows.push([L("easy.when"), `${ts(info.firstTimestamp)} – ${ts(info.lastTimestamp).slice(11)}`]);
@@ -1387,7 +1395,7 @@ function renderEasyDone(m: Extract<FromWorker, { type: "done" }>) {
       try { return !!navigator.canShare?.({ files: [new File([tl.blob], tl.fileName, { type: tl.blob.type })] }); } catch { return false; }
     })();
     parts.push(`<div class="cinema"><video id="easyVideo" src="${vUrl}" controls loop muted autoplay playsinline></video></div>
-      <div id="easyTimeline" class="timeline" hidden></div>
+      <div id="easyTimeline" class="timeline" dir="ltr" hidden></div>
       <div class="row"><a class="btn primary" href="${vUrl}" download="${escapeHtml(tl.fileName)}">${escapeHtml(L("easy.saveFilm", (tl.blob.size / 1048576).toFixed(1)))}</a>
       ${canShare ? `<button class="btn" id="easyShare">${escapeHtml(L("easy.share"))}</button>` : ""}
       ${m.montage && mUrl ? `<a class="btn" href="${mUrl}" download="${escapeHtml(m.montage.fileName)}">${escapeHtml(L("easy.saveMontage"))}</a>` : ""}
