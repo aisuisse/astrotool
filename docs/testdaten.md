@@ -249,3 +249,14 @@ Ergebnisse:
 - **Volltest der App:** 56 Fälle (neu: iPhone-Fotos öffnen, Mondfinsternis im Einfach-Modus), 254 Einheitstests.
 - **Hoch- und Querformat gemischt (Versuch verworfen):** Ein Bildfeld, das beide Formate umfasst (statt des Formats des grössten Fotos), verschob bei der Samsung-Serie von 0.34 die Schwellen der Sonnensuche – 3 statt 9 Fotos im Film. Es bleibt bei der Regel von 0.34; Fotos im anderen Format liegen mittig im Bildfeld und sind oben und unten bzw. links und rechts beschnitten.
 - **Grenzen:** Mondfinsternis: Der Mond dreht sich zwischen Handyfotos (aus der Hand, verschiedene Haltung) – das wird noch nicht ausgeglichen; zwischen den Fotos wird überblendet statt den Erdschatten wandern zu lassen. macOS- und Linux-App sind nur automatisch gebaut und gestartet. Totalität einer Sonnenfinsternis mit dem Handy: keine geeignete freie Serie gefunden.
+
+## Einfach-Modus zum Erleben (0.36, 11.11.2026)
+
+Keine neuen Testdaten. Geprüft mit der eigenen Serie (77 Fotos, 28 MP) und der Mondfinsternis-Serie (Samsung S24 Ultra, 28 Fotos).
+
+- **Live-Ansicht:** Der Rechenteil schickt je Foto ein Vorschaubild an die Oberfläche (die verkleinerte Ansicht der schnellen Analyse mit dem gefundenen Kreis, später das zentrierte Bild mit 320 px Breite). Die Bilder werden übergeben, nicht kopiert. Zeit im Browser, eigene Serie, warm gelaufen: 49 s mit Live-Ansicht, 54 s ohne – der Unterschied liegt in der Streuung der Läufe. Der erste Lauf nach dem Laden der Seite dauert länger (68 s), mit oder ohne Live-Ansicht.
+- **Zeitleiste:** Die Filmzeit je Foto kommt aus dem Ablauf des Films (`filmMarks`). Liegen zwei Fotos nur Sekunden auseinander, teilen sie sich im zeittreuen Film einen Platz – die Zeitleiste zeigt dann ein Foto weniger, als im Film sind (Mondfinsternis: 13 Bildchen bei 14 Fotos).
+- **Handy-Ansicht (375 × 812, im Desktop-Browser nachgestellt):** Kopfzeile einzeilig, keine waagrechte Verschiebung, Film im Hochformat füllt den Bildschirm. Auf Geräten nur mit Fingerbedienung heisst es „Wähle die Fotos deiner Finsternis“ statt „hierher ziehen“, die Ordnerwahl entfällt.
+- **Referenzserien in der fertigen App (Einfach-Modus):** eigene Serie 73 von 77, Samsung M51 9 von 40, Pixel 44 von 68, Spanien 52 von 55, Mondfinsternis 14 von 28 – alle wie in 0.35. Die eigene Serie braucht in der App 43 s (0.35: 64–70 s).
+- **Volltest der App:** 56 Fälle (der Fall „Mondfinsternis im Einfach-Modus“ prüft neu den wachsenden Streifen, die Meldung zum Mond und den Sprung über die Zeitleiste), 258 Einheitstests (neu: Filmzeit je Foto, Blick in die Analyse).
+- **Nicht geprüft:** echte Handys (Rechenzeit, Speicher bei vielen Fotos, Bildschirm-wach-halten), der Teilen-Knopf (der Testbrowser kann keine Dateien teilen), „Bewegung reduzieren“ (eingebaut: stehendes Bild statt Bewegung, kein Daumenkino).

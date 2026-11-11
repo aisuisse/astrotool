@@ -806,13 +806,22 @@ try {
     const info = await ev(`document.getElementById('easyInfo').innerText.replace(/\\n/g, ' | ')`);
     await ev(`document.getElementById('easyShape').value = 'portrait'; document.getElementById('easyRun').click(); true`);
     const t0 = Date.now();
+    // Live-Ansicht: beim Rechnen wächst der Streifen mit den Fotos, die Meldung nennt den Mond
+    let liveChips = 0, liveBadge = "";
     for (;;) {
-      const st = await ev(`({ done: !document.getElementById('easyResult').hidden, err: document.getElementById('easyError').innerText })`);
+      const st = await ev(`({ done: !document.getElementById('easyResult').hidden, err: document.getElementById('easyError').innerText, chips: document.querySelectorAll('#liveStrip > *').length, badge: document.getElementById('liveBadge').innerText })`);
       if (st.err) throw new Error("App meldet: " + st.err);
       if (st.done) break;
+      liveChips = Math.max(liveChips, st.chips);
+      if (/(moon|Mond)/i.test(st.badge)) liveBadge = st.badge;
       if (Date.now() - t0 > 900_000) throw new Error("Zeitüberschreitung beim Film");
-      await sleep(1000);
+      await sleep(300);
     }
+    check(liveChips >= 10, `Live-Ansicht: höchstens ${liveChips} Bildchen im Streifen`);
+    check(liveBadge !== "", "Live-Ansicht: keine Meldung zum Mond gesehen");
+    // Kino: Film mit Zeitleiste – ein Tipp auf ein Foto springt im Film dorthin
+    const cinema = await ev(`(async () => { const v = document.getElementById('easyVideo'); const it = [...document.querySelectorAll('#easyTimeline .tlItem')]; it[Math.min(4, it.length - 1)]?.click(); await new Promise((r) => setTimeout(r, 600)); return { video: !!v, items: it.length, t: v ? v.currentTime : -1, on: it.findIndex((i) => i.classList.contains('on')) }; })()`);
+    check(cinema.video && cinema.items >= 10 && cinema.t > 1 && cinema.on >= 3, `Kino: ${JSON.stringify(cinema)}`);
     const text = await ev(`document.getElementById('easyResult').innerText`);
     const b64 = await ev(`__t.base64('#easyResult a[download]', '\\\\.mp4$')`);
     const p = join(outDir, "einfach_mondfinsternis.mp4");
@@ -831,7 +840,7 @@ try {
     await ev(`document.getElementById('easyAgain')?.click(); document.getElementById('easyShape').value = 'source'; document.querySelector('#easyKind [data-kind="solar"]').click(); document.querySelector('[data-ui="expert"]').click(); true`);
     await sleep(500);
     try { await ev(`localStorage.setItem('astrotool-easy-shape', 'source'); true`); } catch { /* egal */ }
-    return { files: files.length, info, used: Number(m[1]), seconds: (Date.now() - t0) / 1000, text: text.slice(0, 300), probe };
+    return { files: files.length, info, used: Number(m[1]), seconds: (Date.now() - t0) / 1000, text: text.slice(0, 300), probe, liveChips, liveBadge, cinema };
   });
 
   // ---------- Einfach-Modus: Fotos hinein, Film heraus (jedes zweite Bild – noch unregelmässigere Abstände) ----------
