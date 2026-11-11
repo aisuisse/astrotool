@@ -133,6 +133,22 @@ describe("Zeitraffer-Planung", () => {
     expect(videoFrameRate(50)).toBe(60);
     expect(ticksToClock(621_355_968_000_000_000n + BigInt(Date.UTC(2026, 7, 12, 19, 33, 9)) * 10_000n)).toBe("19:33:09");
   });
+
+  it("Zeitleiste zum Film: Filmzeit je Foto", async () => {
+    const { filmMarks } = await import("../src/engine/timelapse");
+    // Foto 0 (2 Bilder), 3 berechnete Zwischenbilder, Foto 2, Foto 1 nur als Zwischenbild, Foto 2 nochmals (Standbild am Ende)
+    const runs = [
+      { photo: 0, real: true, count: 2 },
+      { photo: 0, real: false, count: 3 },
+      { photo: 2, real: true, count: 1 },
+      { photo: 1, real: false, count: 4 },
+      { photo: 2, real: true, count: 10 },
+    ];
+    expect(filmMarks(runs, 4, 10)).toEqual([0, -1, 0.5, -1]);
+    expect(filmMarks([], 2, 30)).toEqual([-1, -1]);
+    // Reihenfolge im Film anders als die Reihenfolge der Fotos (nach Aufnahmezeit sortiert)
+    expect(filmMarks([{ photo: 1, real: true, count: 3 }, { photo: 0, real: true, count: 3 }], 2, 30)).toEqual([0.1, 0]);
+  });
 });
 
 describe("Robustheit", () => {

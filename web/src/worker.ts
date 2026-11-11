@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 // Rechenarbeit läuft hier, damit die Oberfläche flüssig bleibt.
-import { analyseFrame, colouriseOutput, outputColorId, outputSize, processSource, type FrameResult, type ProcessOptions } from "./engine/pipeline";
+import { analyseFrame, colouriseOutput, outputColorId, outputSize, processSource, type AnalysisObserver, type FrameResult, type ProcessOptions } from "./engine/pipeline";
 import { hasTransform, transformedSize } from "./engine/transform";
 import { movieMeta } from "./engine/eclipsemovie";
 import { colorName, SerReader, SerWriter, type Frame } from "./engine/ser";
@@ -16,9 +16,9 @@ import { ZipWriter } from "./engine/zip";
 import { calibratedSource, decodeMaster, encodeMaster, masterStats, MasterBuilder, type Calibration, type Master } from "./engine/calibrate";
 import { FileSink, MemorySink, type ByteSink, type WritableFile } from "./engine/sink";
 import { encodeFits, encodePng16, encodeTiff16, type ImageMeta } from "./engine/imagewrite";
-import { captureDate, offsetMs, type TimelapseOptions } from "./engine/timelapse";
+import { captureDate, offsetMs, ticksToClock, type TimelapseOptions } from "./engine/timelapse";
 import { seriesTime, shiftMs, timeFromName, winjuposName } from "./engine/winjupos";
-import { TimelapseRecorder, type NativeHevc } from "./timelapse-encode";
+import { frameToRGBA8, TimelapseRecorder, type NativeHevc } from "./timelapse-encode";
 import { MontageRecorder } from "./montage-render";
 import type { MontageOptions } from "./engine/montage";
 import { msg, tr } from "./i18n";
@@ -44,7 +44,7 @@ async function encodeImage(f: Frame, format: OutputFormat, meta: ImageMeta): Pro
 export type ToWorker =
   | { type: "open"; files: File[]; bigEndian: boolean; rawMode?: "raw" | "preview"; join?: boolean; mainCamera?: boolean }
   | { type: "preview"; index: number; options: ProcessOptions }
-  | { type: "process"; options: ProcessOptions; format: OutputFormat; folder?: FileSystemDirectoryHandle; target?: FileSystemFileHandle; timelapse: TimelapseOptions; montage?: MontageOptions; nativeHevc?: boolean }
+  | { type: "process"; live?: boolean; options: ProcessOptions; format: OutputFormat; folder?: FileSystemDirectoryHandle; target?: FileSystemFileHandle; timelapse: TimelapseOptions; montage?: MontageOptions; nativeHevc?: boolean }
   | { type: "native-reply"; id: number; ok: boolean; result?: unknown; error?: string }
   | { type: "render"; index: number; seq: number; display: DisplayOptions }
   | { type: "export"; from: number; to: number; mode: "ser-raw" | "ser-processed" | "png"; display: DisplayOptions; folder?: FileSystemDirectoryHandle; target?: FileSystemFileHandle }
@@ -121,6 +121,23 @@ export type FromWorker =
     }
   | { type: "progress"; phase: "analyse" | "write" | "video"; done: number; total: number }
   | {
+      /**
+       * Live-Ansicht (nur auf Wunsch, process.live): ein Vorschaubild je Foto. "analyse": das verkleinerte Foto mit
+       * der gefundenen Scheibe (Mitte und Radius als Anteil der Bildbreite bzw. -höhe); "write": das zentrierte Bild
+       * für den Film, k = laufende Nummer im Film.
+       */
+      type: "peek";
+      phase: "analyse" | "write";
+      index: number;
+      name: string;
+      bitmap: ImageBitmap | null;
+      disc?: { x: number; y: number; r: number } | null;
+      ok?: boolean;
+      reason?: string;
+      k?: number;
+      clock?: string;
+    }
+  | {
       type: "done";
       blob: Blob | null;
       fileName: string;
@@ -136,7 +153,7 @@ export type FromWorker =
       discStats: { meanR: number; maxRms: number } | null;
       /** Totalität: Bilder am Mondrand, zusammengefasste Belichtungsreihen */
       totality: { frames: number; hdrGroups: number } | null;
-      timelapse: { blob: Blob; fileName: string; codec: string; frames: number; seconds: number; fallback?: boolean; synthesized?: number; blended?: number } | null;
+      timelapse: { blob: Blob; fileName: string; codec: string; frames: number; seconds: number; fallback?: boolean; synthesized?: number; blended?: number; marks?: number[] } | null;
       timelapseError: string | null;
       montage: { blob: Blob; fileName: string; width: number; height: number; frames: number } | null;
       montageError: string | null;
@@ -712,11 +729,30 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
         activeSink = null;
         fileName = wjSeries ? `${wjSeries}.ser` : `${baseName}_astro.ser`;
       } else if (m.format === "none") {
+        // Live-Ansicht: je Foto ein Vorschaubild an die Oberfläche (wird übergeben, nicht kopiert)
+        let peekK = 0;
+        const shift = clockShift(src);
+        const observe: AnalysisObserver | undefined = m.live
+          ? async ({ index, small, scale, result }) => {
+              let bitmap: ImageBitmap | null = null;
+              try {
+                bitmap = await createImageBitmap(new ImageData(frameToRGBA8(small), small.width, small.height));
+              } catch { /* ohne Vorschau weiter */ }
+              const d = result.det.disc;
+              post({
+                type: "peek", phase: "analyse", index, name: src.frameName(index), bitmap,
+                disc: d ? { x: d.cx / scale / small.width, y: d.cy / scale / small.height, r: d.r / scale / small.width } : null,
+                ok: result.accepted, reason: result.reason,
+              }, bitmap ? [bitmap] : []);
+            }
+          : undefined;
         report = await processSource(src, m.options, async (f, r, _k, ts) => {
           const c = col(f);
-          await recorder?.add(c, ts, metaOf(r));
+          const thumb = (await recorder?.add(c, ts, metaOf(r), m.live ? 320 : 0)) ?? null;
+          if (m.live) post({ type: "peek", phase: "write", index: r.index, name: src.frameName(r.index), bitmap: thumb, k: peekK, clock: ticksToClock(ts, shift) }, thumb ? [thumb] : []);
+          peekK++;
           await addMontage(c, r, ts);
-        }, progress, () => cancel);
+        }, progress, () => cancel, observe);
         fileName = "";
       } else {
         const zip = m.folder ? null : new ZipWriter(await openSink(m.target));

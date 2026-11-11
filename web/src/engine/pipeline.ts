@@ -289,6 +289,13 @@ export type Progress = (phase: "analyse" | "write", done: number, total: number)
 /** Empfängt die fertigen Frames in Ausgabe-Reihenfolge. */
 export type FrameSink = (frame: Frame, res: FrameResult, position: number, timestamp: bigint | undefined) => void | Promise<void>;
 
+/**
+ * Blick in die Analyse, für eine Live-Ansicht: das verkleinerte Foto (scale = Bildpunkte je Punkt der Ansicht) und
+ * das Ergebnis der Prüfung dieses Fotos. Gibt es nur bei der schnellen Analyse (dort liegt die Ansicht ohnehin vor).
+ * Spätere Vergleiche der Serie (Grösse, Schärfe) können ein Foto danach noch verwerfen.
+ */
+export type AnalysisObserver = (ev: { index: number; small: Frame; scale: number; result: FrameResult }) => void | Promise<void>;
+
 function frameRange(src: FrameSource, o: ProcessOptions): number[] {
   const n = src.frameCount;
   const start = Math.min(Math.max(0, o.startFrame), n);
@@ -380,8 +387,9 @@ const PREVIEW_SIDE = 800;
  * reichlich Rand für Lichtschein, Korona und den Himmel als Hintergrund) in voller Auflösung vermessen.
  * Liegt Helles über das ganze Bild verteilt (Landschaft), ist der Bereich das ganze Bild – dann ohne Zeitgewinn.
  */
-async function detectFast(src: FrameSource, index: number, o: ProcessOptions): Promise<FrameDetection> {
+async function detectFast(src: FrameSource, index: number, o: ProcessOptions, peek?: (small: Frame, scale: number) => void): Promise<FrameDetection> {
   const { frame: small, scale } = await src.readPreview!(index, PREVIEW_SIDE);
+  peek?.(small, scale);
   const lumS = lumFor(src, small, o);
   const coarse = detectObject(lumS, { threshold: o.threshold ?? undefined });
   if (!coarse.found) return coarse;
@@ -787,6 +795,7 @@ export async function processSource(
   sink: FrameSink,
   onProgress: Progress = () => {},
   shouldCancel: () => boolean = () => false,
+  observe?: AnalysisObserver,
 ): Promise<ProcessReport> {
   const indices = frameRange(src, o);
   let [cw, ch] = outSize(src, o);
@@ -802,7 +811,10 @@ export async function processSource(
     if (shouldCancel()) throw new Error(msg("cancelled"));
     if (fast) {
       try {
-        results.push(judge(indices[k], await detectFast(src, indices[k], o), o));
+        let seen: { small: Frame; scale: number } | null = null;
+        const res = judge(indices[k], await detectFast(src, indices[k], o, observe ? (small, scale) => { seen = { small, scale }; } : undefined), o);
+        results.push(res);
+        if (observe && seen) await observe({ index: indices[k], ...(seen as { small: Frame; scale: number }), result: res });
       } catch {
         results.push({ index: indices[k], det: emptyDetection(), accepted: false, reason: msg("unreadable"), score: 0 });
       }

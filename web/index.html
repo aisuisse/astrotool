@@ -17,6 +17,8 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
+    <canvas id="easySky" class="easySky" aria-hidden="true"></canvas>
+    <div id="dropVeil" class="dropVeil" aria-hidden="true"><span data-i18n="easy.dropAnywhere">Drop your photos anywhere</span></div>
     <header class="topbar">
       <div class="brand">
         <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="9" /><ellipse cx="16" cy="16" rx="15" ry="4.5" transform="rotate(-20 16 16)" /></svg>
@@ -54,6 +56,7 @@
 
     <main>
       <section id="easy" class="easy" hidden>
+        <canvas id="easyHero" class="easyHero" aria-hidden="true"></canvas>
         <div id="easyKind" class="seg easyKind" role="radiogroup" aria-label="Kind of series">
           <button class="on" data-kind="solar" data-i18n="easy.kind.solar">Solar eclipse</button>
           <button data-kind="lunar" data-i18n="easy.kind.lunar">Lunar eclipse</button>
@@ -84,8 +87,13 @@
           <button id="easyOther" class="btn" data-i18n="easy.other">Choose other photos</button>
         </div>
         <div id="easyBusy" class="easyBusy" hidden>
+          <div class="liveStage">
+            <canvas id="liveCanvas" aria-hidden="true"></canvas>
+            <div id="liveBadge" class="liveBadge" aria-live="off"></div>
+          </div>
           <strong id="easyStep"></strong>
           <div class="progress"><div id="easyBar"></div><span id="easyCount"></span></div>
+          <div id="liveStrip" class="liveStrip" aria-hidden="true"></div>
           <button id="easyCancel" class="btn" data-i18n="btn.cancel">Cancel</button>
         </div>
         <div id="easyResult" class="easyResult" hidden></div>

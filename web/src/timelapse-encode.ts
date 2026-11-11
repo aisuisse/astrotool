@@ -4,7 +4,7 @@ import { GIFEncoder, applyPalette, quantize } from "gifenc";
 import type { Frame } from "./engine/ser";
 import { msg } from "./i18n";
 import { setMp4CreationTime } from "./engine/mp4time";
-import { buildSequence, constantRateCounts, filmLayout, isMp4, movieSeconds, ticksToClock, videoFrameRate, type TimelapseOptions } from "./engine/timelapse";
+import { buildSequence, constantRateCounts, filmLayout, filmMarks, isMp4, movieSeconds, ticksToClock, videoFrameRate, type TimelapseOptions } from "./engine/timelapse";
 import { blendFrames, defaultMovie, fillMoonTrack, planMovie, synthFrame, type MovieFrame, type MovieStep, type Rgba } from "./engine/eclipsemovie";
 
 /** Ein konkreter Encoder-Plan. Die Codec-Strings legen Profil und Level fest, die Handys sicher abspielen. */
@@ -75,6 +75,8 @@ export interface TimelapseResult {
   /** zeittreuer Film: Anzahl gerechneter bzw. überblendeter Videobilder */
   synthesized?: number;
   blended?: number;
+  /** Filmzeit je Foto in Sekunden (Reihenfolge von add; -1 = nicht einzeln zu sehen) – für eine Zeitleiste */
+  marks?: number[];
 }
 
 /** Ein Abschnitt des Videos: dasselbe Bild `count` Videobilder lang */
@@ -82,17 +84,26 @@ type Run = { step: MovieStep; count: number };
 
 /** Sammelt die fertig zugeschnittenen Bilder (verlustfrei als PNG) und baut daraus den Zeitraffer. */
 export class TimelapseRecorder {
-  private frames: { blob: Blob; stamp?: bigint; meta?: Omit<MovieFrame, "t"> }[] = [];
+  private frames: { blob: Blob; stamp?: bigint; meta?: Omit<MovieFrame, "t">; order: number }[] = [];
   private width = 0;
   private height = 0;
 
-  /** meta: Lage von Sonne und Mond im Bild (für Zwischenbilder im zeittreuen Film) */
-  async add(f: Frame, stamp?: bigint, meta?: Omit<MovieFrame, "t">): Promise<void> {
+  /**
+   * meta: Lage von Sonne und Mond im Bild (für Zwischenbilder im zeittreuen Film).
+   * thumb: Breite eines Vorschaubilds, das zurückkommt (für die Live-Ansicht) – 0 = keines.
+   */
+  async add(f: Frame, stamp?: bigint, meta?: Omit<MovieFrame, "t">, thumb = 0): Promise<ImageBitmap | null> {
     this.width = f.width;
     this.height = f.height;
     const c = new OffscreenCanvas(f.width, f.height);
     c.getContext("2d")!.putImageData(new ImageData(frameToRGBA8(f), f.width, f.height), 0, 0);
-    this.frames.push({ blob: await c.convertToBlob({ type: "image/png" }), stamp, meta });
+    this.frames.push({ blob: await c.convertToBlob({ type: "image/png" }), stamp, meta, order: this.frames.length });
+    if (!thumb) return null;
+    try {
+      return await createImageBitmap(c, { resizeWidth: thumb, resizeHeight: Math.max(1, Math.round((thumb * f.height) / f.width)), resizeQuality: "medium" });
+    } catch {
+      return null; // Browser ohne Verkleinern beim Erzeugen: dann ohne Vorschau
+    }
   }
 
   /** Bildpunkte eines gesammelten Bildes (die letzten wenigen bleiben im Speicher) */
@@ -157,6 +168,8 @@ export class TimelapseRecorder {
       }
     }
     const seqLength = runs.reduce((a, r) => a + r.count, 0);
+    // Filmzeit (Sekunden), zu der jedes Foto zum ersten Mal unverändert zu sehen ist – in der Reihenfolge von add()
+    const marks = filmMarks(runs.map((r) => ({ photo: this.frames[r.step.a].order, real: r.step.mode === "real", count: r.count })), this.frames.length, fpsIn);
     const lay = filmLayout(this.width, this.height, o);
     const { W, H } = lay;
     // Balken über und unter dem Bild (Hochformat): Titel und Uhrzeit stehen dort statt im Bild
@@ -230,7 +243,7 @@ export class TimelapseRecorder {
       }
       gif.finish();
       const bytes = gif.bytes();
-      return { blob: new Blob([bytes.slice().buffer as ArrayBuffer], { type: "image/gif" }), fileName: `${baseName}_timelapse.gif`, codec: "GIF", frames: seqLength, seconds, synthesized, blended };
+      return { blob: new Blob([bytes.slice().buffer as ArrayBuffer], { type: "image/gif" }), fileName: `${baseName}_timelapse.gif`, codec: "GIF", frames: seqLength, seconds, synthesized, blended, marks };
     }
 
     // MP4 zum Teilen (WhatsApp, Google Fotos): konstante Bildrate, "fast start", Profile, die Handys abspielen.
@@ -261,6 +274,7 @@ export class TimelapseRecorder {
           seconds,
           synthesized,
           blended,
+          marks,
         };
       } catch {
         nativeFailed = true; // kein FFmpeg oder Fehler → wie bisher mit H.264 weiter
@@ -310,6 +324,7 @@ export class TimelapseRecorder {
       seconds,
       synthesized,
       blended,
+      marks,
       fallback: (o.format === "mp4-hevc" && plan.codec !== "hevc") || nativeFailed,
     };
   }

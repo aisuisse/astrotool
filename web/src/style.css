@@ -219,6 +219,51 @@ body.easy main { grid-template-columns: minmax(0, 1fr); max-width: 860px; margin
 body.easy main > .stage, body.easy main > aside, body.easy .expertOnly { display: none !important; }
 .easy { display: flex; flex-direction: column; gap: 14px; }
 .easy h1 { margin: 6px 0 0; font-size: 26px; }
+/* ---------- Einfach-Modus zum Erleben: Sternenhimmel, gezeichnete Finsternis, Live-Ansicht, Kino ---------- */
+.easySky { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; display: none; pointer-events: none; }
+body.easy .easySky { display: block; }
+body.easy { background: #0a0f1a; }
+:root[data-night="1"] .easySky { display: none; }
+body.easy .topbar { background: color-mix(in srgb, var(--surface) 72%, transparent); backdrop-filter: blur(8px); }
+.easyHero {
+  width: 100%; height: clamp(170px, 34vh, 320px); display: block; margin-bottom: -18px;
+  /* Lichtschein und Korona laufen zum Rand hin weich aus */
+  -webkit-mask-image: radial-gradient(closest-side, #000 52%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 52%, transparent 100%);
+}
+/* nur auf der Startseite; sobald Fotos da sind, gehört der Platz der Arbeit */
+#easy:not(.isDrop) .easyHero { display: none; }
+#easy.isBusy .easyKind, #easy.isBusy .lead, #easy.isResult .easyKind, #easy.isResult .lead, #easy.isResult h1 { display: none; }
+#easy.isDrop h1, #easy.isDrop .lead { text-align: center; }
+#easy.isDrop h1 { font-size: 30px; }
+#easy.isDrop .easyKind { align-self: center; }
+body.easy .easyDrop, body.easy .easyReady, body.easy .easyBusy, body.easy .easyResult {
+  background: color-mix(in srgb, var(--surface) 78%, transparent); backdrop-filter: blur(6px);
+}
+.easyPick .btn { padding: 12px 20px; font-size: 15px; }
+/* Fotos irgendwo auf der Seite loslassen */
+.dropVeil { position: fixed; inset: 10px; z-index: 50; display: none; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 16px; background: rgba(8, 12, 20, 0.72); color: var(--text); font-size: 22px; font-weight: 600; pointer-events: none; text-align: center; padding: 20px; }
+body.easy.dragging .dropVeil { display: flex; }
+/* Live-Ansicht */
+.liveStage { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+.liveStage canvas { display: block; width: 100%; height: clamp(200px, 46vh, 520px); }
+.liveBadge { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px); padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.62); color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.liveBadge:empty { display: none; }
+.liveBadge.ok::before { content: "✓ "; color: #58d68d; }
+.liveBadge.bad::before { content: "✗ "; color: #ff7b6b; }
+.liveStrip, .timeline { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 6px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+.liveStrip { min-height: 64px; }
+.liveChip { width: 56px; height: 56px; flex: none; border-radius: 6px; border: 2px solid transparent; background: #000; }
+.liveChip.ok { border-color: #2f7d55; }
+.liveChip.bad { border-color: #a9483c; opacity: 0.55; }
+/* Ergebnis wie im Kino */
+.cinema { position: relative; border-radius: 10px; overflow: hidden; background: #000; box-shadow: 0 0 0 1px var(--line), 0 18px 60px rgba(0, 0, 0, 0.65); }
+.cinema video { display: block; width: 100%; max-height: 72vh; border-radius: 0; }
+.tlItem { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; border: 2px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.tlItem canvas { width: 56px; height: 56px; border-radius: 5px; background: #000; display: block; }
+.tlItem.on { border-color: var(--accent); color: var(--text); }
+.easyResult .row .btn { padding: 11px 16px; }
+@media (prefers-reduced-motion: reduce) { .timeline, .liveStrip { scroll-behavior: auto; } }
 .easyKind { align-self: flex-start; }
 /* nur im Browser (in der Desktop-App ausgeblendet) */
 body.app .webOnly { display: none !important; }
@@ -243,6 +288,14 @@ a.btn { text-decoration: none; }
   /* Handy: Kopfzeile schmal – Untertitel weg, Knöpfe umbrechen */
   .brand small { display: none; }
   .topbar { flex-wrap: wrap; gap: 8px; }
+  /* Einfach-Modus am Handy: Zusatzprogramme sind Sache der Desktop-App – die Kopfzeile bleibt einzeilig */
+  body.easy #toolsBtn { display: none; }
+  body.easy .actions { gap: 6px; }
+  body.easy .actions .btn { padding: 6px 9px; font-size: 13px; }
+  body.easy .uiSwitch { margin-right: 0; }
   .easyKind { align-self: stretch; }
   .easyKind button { padding: 8px 6px; }
+  #easy.isDrop h1 { font-size: 24px; }
+  .easyResult .row .btn { flex: 1 1 45%; text-align: center; }
+  .dropVeil { font-size: 18px; }
 }

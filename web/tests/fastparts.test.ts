@@ -142,6 +142,36 @@ describe("Schnelle Analyse", () => {
     expect(diff / n).toBeLessThan(1);
   });
 
+  it("Blick in die Analyse: jedes Foto einmal, verkleinert, mit dem Ergebnis der Prüfung", async () => {
+    const src = await sourceOf(pics);
+    const seen: { index: number; w: number; h: number; scale: number; ok: boolean; x?: number; y?: number; r?: number }[] = [];
+    const rep = await processSource(src, { ...easy, fastAnalyse: true }, () => {}, () => {}, () => false, ({ index, small, scale, result }) => {
+      const d = result.det.disc;
+      seen.push({ index, w: small.width, h: small.height, scale, ok: result.accepted, x: d?.cx, y: d?.cy, r: d?.r });
+    });
+    expect(seen.map((s) => s.index)).toEqual(pics.map((_, i) => i));
+    for (const s of seen) {
+      expect(Math.max(s.w, s.h)).toBeLessThanOrEqual(800);
+      expect(s.scale).toBe(W / s.w);
+    }
+    // das Bild ohne Sonne ist schon hier verworfen; die anderen zeigen die Sonne an der richtigen Stelle
+    expect(seen[6].ok).toBe(false);
+    for (const k of [0, 1, 2, 3, 4, 5]) {
+      expect(seen[k].ok).toBe(true);
+      expect(Math.hypot(seen[k].x! - (500 + 290.3 * k), seen[k].y! - (400 + 141.7 * k))).toBeLessThan(1.5);
+      expect(Math.abs(seen[k].r! - r)).toBeLessThan(1.5);
+    }
+    expect(rep.frames.length).toBe(pics.length);
+  });
+
+  it("ohne Teilansichten gibt es keinen Blick in die Analyse – das Ergebnis bleibt gleich", async () => {
+    const src = await sourceOf(pics.slice(0, 3), undefined, false);
+    let calls = 0;
+    const rep = await processSource(src, { ...easy, fastAnalyse: true }, () => {}, () => {}, () => false, () => { calls++; });
+    expect(calls).toBe(0);
+    expect(rep.written.length).toBe(3);
+  });
+
   it("Quelle ohne Teilansichten: wie gewohnt", async () => {
     const counter = { full: 0, parts: 0 };
     const src = await sourceOf(pics.slice(0, 3), counter, false);

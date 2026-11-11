@@ -145,6 +145,21 @@ export function constantRateCounts(runLengths: number[], fps: number, outFps: nu
 }
 
 /**
+ * Filmzeit (Sekunden), zu der jedes Foto zum ersten Mal unverändert zu sehen ist – für eine Zeitleiste zum Film.
+ * runs: Abschnitte des Films in Reihenfolge (photo = Nummer des Fotos, real = das Foto selbst und kein berechnetes
+ * Zwischenbild, count = Dauer in Bildern bei der Bildrate fps). Fotos, die nie einzeln zu sehen sind: -1.
+ */
+export function filmMarks(runs: { photo: number; real: boolean; count: number }[], photos: number, fps: number): number[] {
+  const marks = new Array<number>(photos).fill(-1);
+  let n = 0;
+  for (const r of runs) {
+    if (r.real && r.photo >= 0 && r.photo < photos && marks[r.photo] < 0) marks[r.photo] = n / fps;
+    n += r.count;
+  }
+  return marks;
+}
+
+/**
  * Aufnahmezeitpunkt als echtes Datum (UTC) für die Video-Metadaten.
  * Bei Kamerazeit ohne Zeitzone ("local") wird die Zeitzone dieses Rechners angenommen –
  * Kamera und Rechner stehen in der Regel auf derselben Ortszeit (inkl. Sommerzeit).
