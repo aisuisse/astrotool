@@ -260,3 +260,15 @@ Keine neuen Testdaten. Geprüft mit der eigenen Serie (77 Fotos, 28 MP) und der 
 - **Referenzserien in der fertigen App (Einfach-Modus):** eigene Serie 73 von 77, Samsung M51 9 von 40, Pixel 44 von 68, Spanien 52 von 55, Mondfinsternis 14 von 28 – alle wie in 0.35. Die eigene Serie braucht in der App 43 s (0.35: 64–70 s).
 - **Volltest der App:** 56 Fälle (der Fall „Mondfinsternis im Einfach-Modus“ prüft neu den wachsenden Streifen, die Meldung zum Mond und den Sprung über die Zeitleiste), 258 Einheitstests (neu: Filmzeit je Foto, Blick in die Analyse).
 - **Nicht geprüft:** echte Handys (Rechenzeit, Speicher bei vielen Fotos, Bildschirm-wach-halten), der Teilen-Knopf (der Testbrowser kann keine Dateien teilen), „Bewegung reduzieren“ (eingebaut: stehendes Bild statt Bewegung, kein Daumenkino).
+
+## Sechs Sprachen (0.37, 11.11.2026)
+
+Keine neuen Testdaten.
+
+- **Übersetzung:** Spanisch, Portugiesisch, Italienisch und Bulgarisch je rund 420 Texte, maschinell übersetzt und stichprobenweise gelesen. Portugiesisch neutral gehalten und für Brasilien lesbar („arquivo“, „smartphone“, „download“ statt „ficheiro“, „telemóvel“, „transferência“); Spanisch ohne Wörter, die nur in Spanien üblich sind („equipo“ statt „ordenador“). Durchsicht durch Muttersprachler steht aus.
+- **Einheitstests (264):** jede Sprache hat dieselben Schlüssel wie Englisch, kein Text ist leer, Platzhalter und HTML-Marken stimmen überein, Meldungen des Rechenteils werden in jeder Sprache eingesetzt, die Sprache des ersten Besuchs folgt der Liste des Browsers (`pt-BR` → Portugiesisch, unbekannte Sprache → nächste der Liste, sonst Englisch).
+- **Volltest der App (56 Fälle):** der Fall „Sprache wählen“ schaltet alle sechs Sprachen durch und prüft Auswahlliste, Beschriftungen, `lang` der Seite und das Merken der Wahl.
+- **Im Browser:** alle Sprachen am Desktop und in Handybreite (375 × 812) durchgeschaltet – keine waagrechte Verschiebung, Kopfzeile am Handy einzeilig. Lange Wörter (Bulgarisch) brechen die Knopfreihe der Vorlagen um statt abgeschnitten zu werden.
+- **Installer:** Englisch, Deutsch, Spanisch (zwei Einträge für die beiden Windows-Kennungen), Portugiesisch (Portugal und Brasilien), Italienisch, Bulgarisch – im erzeugten Installer-Skript enthalten; nicht in jeder Sprache durchgeklickt.
+- **Referenzserien in der fertigen App (Einfach-Modus):** eigene Serie 73 von 77, Samsung M51 9 von 40, Pixel 44 von 68, Spanien 52 von 55, Mondfinsternis 14 von 28 – alle wie in 0.36.
+- **Arabisch:** nicht eingebaut. Abstände und Ausrichtung folgen aber schon der Schreibrichtung, Film und Zeitleiste bleiben von links nach rechts.
