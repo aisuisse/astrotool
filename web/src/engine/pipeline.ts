@@ -111,6 +111,8 @@ export interface ProcessOptions extends TransformOptions, WinJuposOptions {
    * Teilansichten (hasParts); sonst wie gewohnt.
    */
   fastAnalyse: boolean;
+  /** Fotos (Nummern in der Serie), die trotz verworfener Prüfung verwendet werden – wenn eine Scheibe gemessen wurde */
+  forceFrames?: number[];
 }
 
 export const defaultOptions: ProcessOptions = {
@@ -268,6 +270,8 @@ export interface FrameResult {
   accepted: boolean;
   reason?: string;
   score: number;
+  /** vom Benutzer zurückgeholt (forceFrames), obwohl die Prüfung es verworfen hätte */
+  forced?: boolean;
   /** Bei der Ausgabe: dieses Bild steht für die ganze HDR-Belichtungsreihe (Frame-Indizes) */
   hdrGroup?: number[];
   /** Bei der Ausgabe: linke obere Ecke des Ausschnitts im Originalbild (für Lage von Sonne und Mond im Ausschnitt) */
@@ -527,7 +531,7 @@ export function judge(index: number, det: FrameDetection, o: ProcessOptions): Fr
     else if (o.rejectEdgeTouching && det.touchesEdge) Object.assign(r, { accepted: false, reason: msg("touchesEdge") });
     else if (o.centreMode === "disc" && o.centre && !det.disc)
       // fast schwarzes Bild (Sonne hinter Wolken, Filter zu dicht): verständlicher Grund statt „Rand nicht gefunden“
-      Object.assign(r, { accepted: false, reason: msg(det.maxValue < 0.08 ? "tooDark" : "noLimb") });
+      Object.assign(r, { accepted: false, reason: msg(det.maxValue < 0.08 ? "tooDark" : o.subject === "moon" ? "noLimbMoon" : "noLimb") });
     // Rand zwar gefunden, aber im fast schwarzen Bild nur unsicher (Streuung > 2 px): Radius und Mitte sind dann
     // oft falsch (echte Serie: r 124 statt 236) – lieber verwerfen als die Sonne springen lassen
     else if (o.centreMode === "disc" && o.centre && det.disc && det.maxValue < 0.08 && det.disc.rms > 2)
@@ -854,6 +858,16 @@ export async function processSource(
     // Mond: In der Totalität ist der Rand weich und verrauscht (lange belichtet, Handy) – nur grobe Fälle verwerfen
     if (o.rejectBlurred) rejectBlurred(results, stamps, o.subject === "moon" ? 2.5 : 1.6, o.subject === "moon" ? 3 : 1.5, 8, o.subject);
     rejectSunInsideTotality(results, stamps);
+    // vom Benutzer zurückgeholte Fotos: gelten, sobald eine Scheibe gemessen wurde (sonst lässt sich nichts zentrieren)
+    if (o.forceFrames?.length) {
+      const force = new Set(o.forceFrames);
+      for (const r of results)
+        if (!r.accepted && force.has(r.index) && r.det.disc) {
+          r.accepted = true;
+          r.reason = undefined;
+          r.forced = true;
+        }
+    }
     if (o.totalitySunCentre) estimateSunInTotality(results, stamps);
     if (o.matchSize) {
       const radii = results.filter((r) => r.accepted && r.det.disc).map((r) => r.det.disc!.r).sort((a, b) => a - b);

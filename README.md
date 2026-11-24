@@ -8,6 +8,16 @@ Astrotool prepares videos and image series for stacking software such as AutoSta
 
 **Try it in your browser: [astrotool.ai-suisse.com](https://astrotool.ai-suisse.com)** – nothing to install, your photos stay on your device. For regular use there is the Windows app (below).
 
+![Easy mode: the finished eclipse film with a timeline of the photos](docs/images/easy-result.jpg)
+
+| Easy mode: drop your photos | Choose the format, make the film |
+|---|---|
+| ![Start screen of the Easy mode with a drawn eclipse](docs/images/easy-start.jpg) | ![Preview of the photos and three format tiles](docs/images/easy-ready.jpg) |
+| **Watch while Astrotool works** | **Look at sorted-out photos and bring them back** |
+| ![Live view: the photo with the circle that was found, the film strip grows](docs/images/easy-live.jpg) | ![A sorted-out photo shown large with the reason and the button "Use anyway"](docs/images/easy-rejected.jpg) |
+
+Expert mode – the solar limb is detected even on a thin crescent:
+
 ![Eclipse mode: the solar limb is detected even on a thin crescent](docs/images/eclipse-mode.jpg)
 
 ## Highlights
@@ -21,6 +31,7 @@ Astrotool prepares videos and image series for stacking software such as AutoSta
 - **Time-lapses** that are ready to share – MP4 H.265/HEVC or H.264 (plays in WhatsApp and Google Photos and is filed under the capture date), WebM or GIF, with capture time and title burned in.
 - **Every common input** – SER, AVI (SharpCap, FireCapture & co., also > 4 GB), MP4/MOV/MKV/WebM, JPG/PNG/TIFF, iPhone HEIC and camera RAW (sensor data from DNG – also Fujifilm X-Trans – Canon CR2, Sony ARW, Nikon NEF, Samsung SRW and uncompressed Fujifilm RAF; full-size embedded image for CR3, compressed RAF and others, with a hint to convert them to DNG). No extra software needed.
 - **Built-in viewer** (an independent re-implementation of the classic SER Player idea): play forwards/backwards at 30 fps, set markers, debayer, gain, gamma, colour balance, histogram, save a range or hand it to processing.
+- **Works offline, more control (after 0.37)** – the website keeps working without internet once it has been opened and can be installed like an app – for the observing site without a network. Sorted-out photos can be looked at and brought back, the film format is chosen with three tiles, and the remaining time is shown while Astrotool works.
 - **Six languages (0.37)** – English, German, Spanish, Portuguese, Italian and Bulgarian, in the app, on the website and in the Windows installer. The first start follows the language of your system or browser.
 - **Made for the night** – red night mode, PIPP option files (`.pof`) can be imported.
 

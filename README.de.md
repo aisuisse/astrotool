@@ -6,11 +6,14 @@
 
 Astrotool bereitet Videos und Bildserien für Stacking-Programme wie AutoStakkert!, RegiStax oder PlanetarySystemStacker vor. Es findet das Objekt in jedem Frame, zentriert es und schneidet unnötigen Hintergrund weg. Unbrauchbare Frames (Objekt fehlt, zu klein, am Rand, überbelichtet) werden verworfen, die übrigen nach Schärfe sortiert, und nur die besten werden gespeichert. Das spart Speicherplatz und macht das Stacking schneller und besser.
 
+![Einfach-Modus: der fertige Finsternis-Film mit Zeitleiste aus den Fotos](docs/images/easy-result.jpg)
+
 Einsatzgebiete:
 
 - **Planeten** – Jupiter, Saturn, Mars & Co. trotz Seeing und Nachführfehlern stabil in der Bildmitte.
 - **Mond und Sonne** – Vollscheibe zentrieren, Oberflächen-Ausschnitte stabilisieren (0.22).
 - **Finsternis-Film mit einem Klick (Einfach-Modus)** – für Reisende ohne Astronomie-Kenntnisse: alle Fotos der Finsternis hineinziehen (Kamera oder Handy, beliebige Abstände, auch verschieden gezoomt); Astrotool sortiert verwackelte, überstrahlte und Bilder ohne Sonne aus, hält die Sonne gleich gross in der Mitte und macht daraus ein MP4 (1080 × 1080), das gleichmässig läuft – Bilder zwischen den Fotos werden berechnet, der Mond steht dort, wo er zu dieser Zeit war (0.34).
+- **Ohne Internet nutzbar, mehr Kontrolle (nach 0.37)** – die Webseite läuft ohne Internet weiter, sobald sie einmal geöffnet war, und lässt sich wie eine App installieren – für den Beobachtungsort ohne Netz. Aussortierte Fotos kann man ansehen und zurückholen, das Format des Films wählt man über drei Kacheln, und beim Rechnen steht die Restzeit da.
 - **Sechs Sprachen (0.37)** – Englisch, Deutsch, Spanisch, Portugiesisch, Italienisch und Bulgarisch, in der App, auf der Webseite und im Windows-Installer. Beim ersten Start gilt die Sprache des Systems bzw. Browsers.
 - **Einfach-Modus zum Erleben (0.36)** – ein Sternenhimmel und eine gezeichnete Finsternis begrüssen dich. Beim Rechnen schaust du zu: Jedes Foto erscheint mit dem gefundenen Kreis, der Filmstreifen wächst, aussortierte Fotos nennen den Grund. Der fertige Film läuft gross wie im Kino, darunter eine Zeitleiste aus deinen Fotos – ein Tipp springt dorthin – und am Handy ein Knopf zum Teilen. Die Webseite beginnt in der Sprache des Browsers und ist fürs Handy eingerichtet.
 - **Mondfinsternisse, Handyfotos und weitere Formate (0.35)** – der Einfach-Modus macht auch aus einer **Mondfinsternis** einen Film: Der Mond bleibt über alle Zoomstufen gleich gross in der Mitte, Landschaften mit winzigem Mond werden aussortiert. **iPhone-Fotos (HEIC)** werden direkt gelesen (Hochformat steht aufrecht); der Film ist wahlweise quadratisch, 9:16 (Status, Reels) oder 16:9. Grosse Fotos werden rund 2.5-mal schneller ausgewertet, und Lücken von 20 Minuten und mehr werden ohne Störungen überbrückt.

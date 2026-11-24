@@ -172,6 +172,27 @@ describe("Schnelle Analyse", () => {
     expect(rep.written.length).toBe(3);
   });
 
+  it("zurückgeholte Fotos (forceFrames): gelten trotz verworfener Prüfung – aber nur mit gemessener Scheibe", async () => {
+    // Mindestgrösse über dem Durchmesser der Sonne: alles wird als zu klein verworfen
+    const strict = { ...easy, fastAnalyse: true, minObjectSize: 400 };
+    const none = await processSource(await sourceOf(pics), strict, () => {});
+    expect(none.written.length).toBe(0);
+    expect(none.frames[0].det.disc).toBeDefined();
+    expect(none.frames[6].det.disc).toBeUndefined();
+    // Foto 0 und 2 zurückholen; Foto 6 zeigt keine Sonne und bleibt draussen
+    const out: Frame[] = [];
+    const rep = await processSource(await sourceOf(pics), { ...strict, forceFrames: [0, 2, 6] }, (f) => { out.push(f); });
+    expect(rep.frames.filter((f) => f.accepted).map((f) => f.index)).toEqual([0, 2]);
+    expect(rep.frames[0].forced).toBe(true);
+    expect(rep.frames[0].reason).toBeUndefined();
+    expect(rep.frames[6].accepted).toBe(false);
+    expect(rep.frames[1].reason).toContain("tooSmall");
+    expect(out.length).toBe(2);
+    // die Sonne steht in der Mitte des Ausschnitts
+    const f = out[0], mid = (Math.floor(f.height / 2) * f.width + Math.floor(f.width / 2)) * 3;
+    expect(f.data[mid] + f.data[mid + 1] + f.data[mid + 2]).toBeGreaterThan(0);
+  }, 60_000);
+
   it("Quelle ohne Teilansichten: wie gewohnt", async () => {
     const counter = { full: 0, parts: 0 };
     const src = await sourceOf(pics.slice(0, 3), counter, false);

@@ -145,7 +145,8 @@ export type FromWorker =
       /** direkt auf die Platte geschrieben: Dateiname */
       savedToFile: string | null;
       written: number;
-      rejected: { name: string; reason: string }[];
+      /** index: Nummer des Fotos in der Serie; canUse: es wurde eine Scheibe gemessen – das Foto lässt sich zurückholen (forceFrames) */
+      rejected: { name: string; reason: string; index: number; canUse: boolean }[];
       scores: number[];
       outWidth: number;
       outHeight: number;
@@ -731,6 +732,8 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
       } else if (m.format === "none") {
         // Live-Ansicht: je Foto ein Vorschaubild an die Oberfläche (wird übergeben, nicht kopiert)
         let peekK = 0;
+        // Vorschaubild je Foto: bei wenigen Fotos grösser (scharf auf grossen Bildschirmen), bei vielen sparsam
+        const liveThumb = !m.live ? 0 : src.frameCount <= 80 ? 640 : src.frameCount <= 200 ? 480 : 320;
         const shift = clockShift(src);
         const observe: AnalysisObserver | undefined = m.live
           ? async ({ index, small, scale, result }) => {
@@ -748,7 +751,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
           : undefined;
         report = await processSource(src, m.options, async (f, r, _k, ts) => {
           const c = col(f);
-          const thumb = (await recorder?.add(c, ts, metaOf(r), m.live ? 320 : 0)) ?? null;
+          const thumb = (await recorder?.add(c, ts, metaOf(r), liveThumb)) ?? null;
           if (m.live) post({ type: "peek", phase: "write", index: r.index, name: src.frameName(r.index), bitmap: thumb, k: peekK, clock: ticksToClock(ts, shift) }, thumb ? [thumb] : []);
           peekK++;
           await addMontage(c, r, ts);
@@ -818,7 +821,7 @@ ctx.onmessage = async (ev: MessageEvent<ToWorker>) => {
         savedToFolder: !!m.folder && IMAGE_FORMATS.includes(m.format),
         savedToFile: m.target && m.format !== "none" && !m.folder ? m.target.name : null,
         written: report.written.length,
-        rejected: report.frames.filter((f) => !f.accepted).map((f) => ({ name: src.frameName(f.index), reason: f.reason ?? "" })),
+        rejected: report.frames.filter((f) => !f.accepted).map((f) => ({ name: src.frameName(f.index), reason: f.reason ?? "", index: f.index, canUse: !!f.det.disc })),
         scores: report.written.map((i) => scoreOf.get(i) ?? 0),
         outWidth: report.outWidth,
         outHeight: report.outHeight,

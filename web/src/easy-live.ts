@@ -254,8 +254,22 @@ export class Hero {
   }
 }
 
-export interface AnalysedPeek { bitmap: ImageBitmap | null; disc?: { x: number; y: number; r: number } | null; ok: boolean; label: string }
+export interface AnalysedPeek { index: number; bitmap: ImageBitmap | null; disc?: { x: number; y: number; r: number } | null; ok: boolean; label: string }
+/** Verkleinertes Foto (JPEG) mit der gefundenen Scheibe – zum Ansehen aussortierter Fotos nach dem Lauf */
+export interface PhotoView { blob: Promise<Blob | null>; disc: { x: number; y: number; r: number } | null; aspect: number }
 export interface FilmThumb { bitmap: ImageBitmap; clock: string; k: number }
+
+/** Bild als kleines JPEG aufheben (höchstens 640 px breit) */
+function keep(b: ImageBitmap): Promise<Blob | null> {
+  try {
+    const k = Math.min(1, 640 / b.width), w = Math.max(1, Math.round(b.width * k)), h = Math.max(1, Math.round(b.height * k));
+    const c = new OffscreenCanvas(w, h);
+    c.getContext("2d")?.drawImage(b, 0, 0, w, h);
+    return c.convertToBlob({ type: "image/jpeg", quality: 0.8 }).catch(() => null);
+  } catch {
+    return Promise.resolve(null);
+  }
+}
 
 /** Live-Ansicht während der Verarbeitung: grosses Bild, Hinweis darunter, Streifen mit allen bisherigen Bildern. */
 export class LiveView {
@@ -263,6 +277,7 @@ export class LiveView {
   private flipTimer = 0;
   private flipAt = 0;
   private stripPhase: "analyse" | "write" = "analyse";
+  private views = new Map<number, PhotoView>();
 
   constructor(
     private readonly stage: HTMLCanvasElement,
@@ -274,6 +289,7 @@ export class LiveView {
     this.stopFlip();
     for (const t of this.thumbs) t.bitmap.close();
     this.thumbs = [];
+    this.views = new Map();
     this.strip.replaceChildren();
     this.stripPhase = "analyse";
     this.badge.textContent = "";
@@ -320,6 +336,8 @@ export class LiveView {
     this.badge.className = `liveBadge ${p.ok ? "ok" : "bad"}`;
     const b = p.bitmap;
     if (!b) return;
+    // klein aufheben (JPEG, rund 30 kB): aussortierte Fotos lassen sich nach dem Lauf ansehen
+    this.views.set(p.index, { blob: keep(b), disc: p.disc ?? null, aspect: b.width / b.height });
     const s = this.begin();
     if (s) {
       const { g, w, h } = s;
@@ -391,6 +409,13 @@ export class LiveView {
   stopFlip(): void {
     clearInterval(this.flipTimer);
     this.flipTimer = 0;
+  }
+
+  /** Ansichten aller untersuchten Fotos übergeben */
+  takeViews(): Map<number, PhotoView> {
+    const v = this.views;
+    this.views = new Map();
+    return v;
   }
 
   /** Bilder für die Zeitleiste übergeben (die Live-Ansicht gibt sie ab) */

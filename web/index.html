@@ -74,15 +74,21 @@
           </div>
         </div>
         <div id="easyReady" class="easyReady" hidden>
+          <div id="easyPreview" class="easyPreview" dir="ltr" hidden></div>
           <dl id="easyInfo" class="info"></dl>
           <label class="easyTitle"><span data-i18n="easy.titleLabel">Title in the film (optional)</span><input id="easyTitleIn" type="text" maxlength="80" data-i18n-placeholder="tl.titlePlaceholder" placeholder="e.g. Partial solar eclipse 12 Aug 2026" /></label>
-          <label class="easyTitle"><span data-i18n="easy.shapeLabel">Film format</span>
-            <select id="easyShape">
+          <div class="easyTitle"><span data-i18n="easy.shapeLabel">Film format</span>
+            <div id="easyShapes" class="shapeTiles" role="radiogroup">
+              <button type="button" role="radio" data-shape="source"><i class="shapeIcon sq"></i><b></b><small></small></button>
+              <button type="button" role="radio" data-shape="portrait"><i class="shapeIcon po"></i><b></b><small></small></button>
+              <button type="button" role="radio" data-shape="landscape"><i class="shapeIcon la"></i><b></b><small></small></button>
+            </div>
+            <select id="easyShape" hidden>
               <option value="source" data-i18n="easy.shape.square">Square – WhatsApp, e-mail, photo album</option>
               <option value="portrait" data-i18n="easy.shape.portrait">Portrait 9:16 – status, Reels, Shorts, TikTok</option>
               <option value="landscape" data-i18n="easy.shape.landscape">Landscape 16:9 – YouTube, TV</option>
             </select>
-          </label>
+          </div>
           <button id="easyRun" class="btn primary big" data-i18n="easy.run">Make film</button>
           <button id="easyOther" class="btn" data-i18n="easy.other">Choose other photos</button>
         </div>
@@ -91,7 +97,7 @@
             <canvas id="liveCanvas" aria-hidden="true"></canvas>
             <div id="liveBadge" class="liveBadge" aria-live="off"></div>
           </div>
-          <strong id="easyStep"></strong>
+          <div class="stepRow"><strong id="easyStep"></strong><span id="easyEta" class="muted"></span></div>
           <div class="progress"><div id="easyBar"></div><span id="easyCount"></span></div>
           <div id="liveStrip" class="liveStrip" dir="ltr" aria-hidden="true"></div>
           <button id="easyCancel" class="btn" data-i18n="btn.cancel">Cancel</button>
@@ -100,6 +106,7 @@
         <p id="easyError" class="error" role="alert" hidden></p>
         <footer class="webOnly easyFooter">
           <span data-i18n="web.private">Your photos stay on your device – nothing is uploaded.</span>
+          <span><span data-i18n="web.offline">Works without internet once this page has been opened.</span> <button id="installBtn" type="button" class="linkBtn" data-i18n="web.install" hidden>Install as app</button></span>
           <span><a href="https://github.com/aisuisse/astrotool" target="_blank" rel="noopener" data-i18n="web.source">Free software (GPL) – source code on GitHub</a> · <a href="https://github.com/aisuisse/astrotool/releases/latest" target="_blank" rel="noopener" data-i18n="web.getAppLong">Windows app</a></span>
         </footer>
       </section>
@@ -450,6 +457,14 @@
         </section>
       </aside>
     </main>
+    <dialog id="rejDialog" class="dialog small rejDialog">
+      <div class="rejView" dir="ltr"><img id="rejImg" alt="" /><i id="rejRing"></i></div>
+      <p id="rejText"></p>
+      <div class="row">
+        <button id="rejUse" type="button" class="btn primary"></button>
+        <button id="rejClose" type="button" class="btn" data-i18n="easy.rej.close">Close</button>
+      </div>
+    </dialog>
     <dialog id="toolsDialog" class="dialog">
       <header>
         <h2 data-i18n="tools.title">Tools &amp; setup</h2>

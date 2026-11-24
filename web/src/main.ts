@@ -6,7 +6,7 @@ import { defaultTimelapse, type TimelapseOptions } from "./engine/timelapse";
 import { defaultMontage, type MontageOptions } from "./engine/montage";
 import { dictionaries, isLang, LANG_NAMES, LANGS, LOCALES, pickLang, t as translate, tr as translateMsg, type I18nKey, type Lang } from "./i18n";
 import { initTools, isDesktopApp } from "./tools";
-import { buildTimeline, drawSky, Hero, keepAwake, LiveView, type FilmThumb } from "./easy-live";
+import { buildTimeline, drawSky, Hero, keepAwake, LiveView, type FilmThumb, type PhotoView } from "./easy-live";
 import { initPlayer } from "./player";
 import { filesOf, forgetRecent, recentList, recentSupported, rememberRecent, type RecentEntry } from "./recent";
 import type { CalKind, FileInfo, FromWorker, OutputFormat, ToWorker } from "./worker";
@@ -1170,6 +1170,14 @@ const live = new LiveView($<HTMLCanvasElement>("liveCanvas"), $("liveBadge"), $(
 /** Bildchen der Fotos im Film – für die Zeitleiste unter dem fertigen Film */
 let easyThumbs: FilmThumb[] = [];
 let releaseAwake: (() => void) | null = null;
+/** Ansichten der untersuchten Fotos (Nummer in der Serie) – zum Ansehen der aussortierten */
+let easyViews = new Map<number, PhotoView>();
+/** Aussortierte Fotos aller Läufe dieser Serie: Name, Grund, ob sie sich zurückholen lassen */
+const easyRej = new Map<number, { name: string; reason: string; canUse: boolean }>();
+/** vom Benutzer zurückgeholte Fotos: gewünscht und im letzten Lauf angewendet */
+const easyForce = new Set<number>();
+let easyForceApplied = new Set<number>();
+let easyViewUrls: string[] = [];
 const sky = $<HTMLCanvasElement>("easySky");
 let skyDrawn = "";
 function syncSky() {
@@ -1242,6 +1250,8 @@ function openEasy(picked: PickedFile[]) {
   $("easyDropTitle").textContent = L("easy.reading", imgs.length);
   send({ type: "open", files: imgs.map((p) => p.file), bigEndian: false, rawMode: "preview", mainCamera: true });
   easyPickedCount = picked.length;
+  easyForgetSeries();
+  void showEasyPreview(imgs.map((p) => p.file));
   renderEasy();
 }
 let easyPickedCount = 0;
@@ -1269,6 +1279,8 @@ function renderEasy() {
   $("easyBusy").hidden = !running;
   $("easyResult").hidden = !lastEasy || running;
   if (!info) $("easyDropTitle").textContent = L(touchOnly ? "easy.dropTitle.touch" : "easy.dropTitle");
+  syncShapes();
+  if (rejDialog.open) syncRejected();
   if (info && !running) {
     const locale = LOCALES[lang];
     const rows: [string, string][] = [[L("easy.photos"), info.frameCount.toLocaleString(locale)]];
@@ -1295,9 +1307,21 @@ $<HTMLInputElement>("easyFolder").addEventListener("change", (e) => {
   input.value = "";
 });
 $("easyOther").addEventListener("click", () => resetEasy());
+/** Neue Serie: was zu den Fotos der alten gemerkt war, gilt nicht mehr */
+function easyForgetSeries() {
+  easyRej.clear();
+  easyForce.clear();
+  easyForceApplied = new Set();
+  easyViews = new Map();
+  for (const u of easyViewUrls) URL.revokeObjectURL(u);
+  easyViewUrls = [];
+}
 function resetEasy() {
   info = null;
   lastEasy = null;
+  easyForgetSeries();
+  previewSeq++;
+  $("easyPreview").replaceChildren();
   for (const t of easyThumbs) t.bitmap.close();
   easyThumbs = [];
   live.reset();
@@ -1307,12 +1331,16 @@ function resetEasy() {
   renderEasy();
 }
 
-$("easyRun").addEventListener("click", () => {
+function startEasy() {
   if (!info || busy) return;
   busy = true;
   easyRunning = true;
+  lastEasy = null;
   showEasyError(null);
   const s = easySettings($<HTMLInputElement>("easyTitleIn").value.trim());
+  s.options.forceFrames = [...easyForce];
+  easyForceApplied = new Set(easyForce);
+  etaReset();
   $("easyStep").textContent = L(EK("easy.step.analyse"));
   $("easyBar").style.width = "0%";
   $("easyCount").textContent = "";
@@ -1323,11 +1351,48 @@ $("easyRun").addEventListener("click", () => {
   // Handy: Bildschirm bleibt an, solange gerechnet wird
   void keepAwake().then((release) => { if (easyRunning) releaseAwake = release; else release(); });
   send({ type: "process", live: true, options: s.options, format: "none", timelapse: s.timelapse, montage: s.montage, nativeHevc: false });
-});
+}
+$("easyRun").addEventListener("click", startEasy);
 $("easyCancel").addEventListener("click", () => send({ type: "cancel" }));
+
+// ---------- Restzeit ----------
+// Drei Abschnitte (suchen, zuschneiden, Film). Die späteren werden aus dem ersten geschätzt, bis sie selbst laufen:
+// zuschneiden ≈ 0.6 ×, Film ≈ 1.2 × der Suchzeit (gemessen an den Referenzserien: 0.4–0.75 bzw. 0.8–1.5).
+const ETA_WEIGHT = { analyse: 1, write: 0.6, video: 1.2 } as const;
+const eta = { phase: "", tPhase: 0, analyse: 0, shown: 0, titleBefore: "" };
+function etaReset() {
+  Object.assign(eta, { phase: "", tPhase: 0, analyse: 0, shown: 0, titleBefore: document.title });
+  $("easyEta").textContent = "";
+}
+/** Restzeit in Sekunden (null: noch zu früh) und Anteil des ganzen Laufs */
+function etaOf(phase: "analyse" | "write" | "video", done: number, total: number): { left: number | null; part: number } {
+  const now = performance.now();
+  if (phase !== eta.phase) {
+    if (eta.phase === "analyse") eta.analyse = now - eta.tPhase;
+    eta.phase = phase;
+    eta.tPhase = now;
+  }
+  const frac = total ? Math.min(1, done / total) : 0, el = now - eta.tPhase;
+  const sum = ETA_WEIGHT.analyse + ETA_WEIGHT.write + ETA_WEIGHT.video;
+  const before = phase === "analyse" ? 0 : phase === "write" ? ETA_WEIGHT.analyse : ETA_WEIGHT.analyse + ETA_WEIGHT.write;
+  const part = (before + ETA_WEIGHT[phase] * frac) / sum;
+  if (frac < 0.04 || el < 1500) return { left: null, part };
+  const own = (el * (1 - frac)) / frac;
+  const analyse = phase === "analyse" ? el / frac : eta.analyse;
+  const later = phase === "analyse" ? analyse * (ETA_WEIGHT.write + ETA_WEIGHT.video) : phase === "write" ? analyse * ETA_WEIGHT.video : 0;
+  return { left: (own + later) / 1000, part };
+}
 
 function easyProgress(m: Extract<FromWorker, { type: "progress" }>) {
   $("easyStep").textContent = L(EK(`easy.step.${m.phase}`));
+  const { left, part } = etaOf(m.phase, m.done, m.total);
+  const now = performance.now();
+  if (now - eta.shown > 1000) {
+    eta.shown = now;
+    $("easyEta").textContent = left === null ? "" : left < 55 ? L("easy.eta.s", Math.max(5, Math.round(left / 5) * 5)) : L("easy.eta.min", Math.ceil(left / 60));
+    // im Reiter mitlesen, wenn man inzwischen etwas anderes tut
+    document.title = `${Math.round(part * 100)} % – Astrotool`;
+  }
   $("easyBar").style.width = `${m.total ? (m.done / m.total) * 100 : 0}%`;
   $("easyCount").textContent = m.phase === "video" ? `${Math.round((m.done / Math.max(1, m.total)) * 100)} %` : `${m.done} / ${m.total}`;
   // während der Film entsteht: die fertigen Bilder als Daumenkino
@@ -1340,7 +1405,7 @@ function easyPeek(m: Extract<FromWorker, { type: "peek" }>) {
     m.bitmap?.close();
     return;
   }
-  if (m.phase === "analyse") live.analysed({ bitmap: m.bitmap, disc: m.disc, ok: !!m.ok, label: m.ok ? L(EK("easy.live.found"), m.name) : `${m.name}: ${M(m.reason)}` });
+  if (m.phase === "analyse") live.analysed({ index: m.index, bitmap: m.bitmap, disc: m.disc, ok: !!m.ok, label: m.ok ? L(EK("easy.live.found"), m.name) : `${m.name}: ${M(m.reason)}` });
   else live.written({ bitmap: m.bitmap, clock: m.clock ?? "", k: m.k ?? 0 });
 }
 
@@ -1348,6 +1413,34 @@ function easyStopped() {
   releaseAwake?.();
   releaseAwake = null;
   live.stopFlip();
+  if (eta.titleBefore) document.title = eta.titleBefore;
+}
+
+/** Film fertig, während man woanders ist: im Reiter melden, kurzer Ton, am Handy ein kurzes Vibrieren */
+function easyAnnounce() {
+  if (!document.hidden) return;
+  const before = document.title;
+  document.title = `✓ ${L("easy.doneTitle")} – Astrotool`;
+  document.addEventListener("visibilitychange", function back() {
+    if (document.hidden) return;
+    document.removeEventListener("visibilitychange", back);
+    if (document.title.startsWith("✓")) document.title = before;
+  });
+  try { navigator.vibrate?.(150); } catch { /* egal */ }
+  try {
+    const ac = new AudioContext(), t = ac.currentTime;
+    for (const [f, at] of [[660, 0], [880, 0.16]] as const) {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + at);
+      g.gain.exponentialRampToValueAtTime(0.08, t + at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.35);
+      o.connect(g).connect(ac.destination);
+      o.start(t + at);
+      o.stop(t + at + 0.4);
+    }
+    window.setTimeout(() => void ac.close(), 1000);
+  } catch { /* ohne Ton */ }
 }
 
 /** Gründe für aussortierte Bilder in einfache Gruppen */
@@ -1366,6 +1459,9 @@ function easyDone(m: Extract<FromWorker, { type: "done" }>) {
   easyRunning = false;
   easyStopped();
   easyThumbs = live.take();
+  easyViews = live.takeViews();
+  for (const r of m.rejected) easyRej.set(r.index, { name: r.name, reason: r.reason, canUse: r.canUse });
+  if (m.timelapse) easyAnnounce();
   for (const u of easyUrls) URL.revokeObjectURL(u);
   easyUrls = [];
   lastEasy = m;
@@ -1408,11 +1504,33 @@ function renderEasyDone(m: Extract<FromWorker, { type: "done" }>) {
     const items = [...groups].map(([k, v]) => `<li>${escapeHtml(L(EK(k), v.length))}</li>`);
     if (other) items.push(`<li>${escapeHtml(L(EK("easy.why.otherCamera"), other))}</li>`);
     parts.push(`<div><small>${escapeHtml(L("easy.sortedOut"))}</small><ul>${items.join("")}</ul></div>`);
+  }
+  // Bildchen der aussortierten und der zurückgeholten Fotos: antippen zeigt das Foto gross
+  const chipIds = [...new Set([...m.rejected.map((r) => r.index), ...easyForce, ...easyForceApplied])].filter((i) => easyViews.has(i) && easyRej.has(i)).sort((a, b) => a - b);
+  if (chipIds.length) {
+    parts.push(`<div id="rejStrip" class="rejStrip" dir="ltr">${chipIds.map((i) => `<button type="button" class="rejChip${easyForce.has(i) ? " used" : ""}" data-rej="${i}" title="${escapeHtml(easyRej.get(i)!.name)}"><img alt="" /></button>`).join("")}</div><small class="muted">${escapeHtml(L("easy.rej.hint"))}</small>`);
+    const changed = [...easyForce].filter((i) => !easyForceApplied.has(i)).length + [...easyForceApplied].filter((i) => !easyForce.has(i)).length;
+    if (changed) parts.push(`<div class="row"><button class="btn primary" id="easyRedo">${escapeHtml(L("easy.rej.redo"))}</button></div>`);
+  }
+  if (groups.size || other) {
     parts.push(`<details><summary>${escapeHtml(L("easy.details"))}</summary><small>${[...groups.values()].flat().map(escapeHtml).join("<br>")}${other ? "<br>" + info!.skipped!.map((s) => escapeHtml(`${s.name}: ${s.camera || L("easy.unknownCamera")}`)).join("<br>") : ""}</small></details>`);
   }
   if (m.montage && mUrl) parts.push(`<img src="${mUrl}" alt="" />`);
   $("easyResult").innerHTML = parts.join("");
   $("easyAgain")?.addEventListener("click", () => resetEasy());
+  document.getElementById("easyRedo")?.addEventListener("click", startEasy);
+  for (const u of easyViewUrls) URL.revokeObjectURL(u);
+  easyViewUrls = [];
+  document.querySelectorAll<HTMLButtonElement>("#rejStrip [data-rej]").forEach((btn) => {
+    const i = Number(btn.dataset.rej);
+    void easyViews.get(i)?.blob.then((blob) => {
+      if (!blob || !btn.isConnected) return;
+      const u = URL.createObjectURL(blob);
+      easyViewUrls.push(u);
+      btn.querySelector("img")!.src = u;
+    });
+    btn.addEventListener("click", () => showRejected(i));
+  });
   const video = document.getElementById("easyVideo") as HTMLVideoElement | null;
   if (video && tl?.marks) buildTimeline($("easyTimeline"), video, easyThumbs, tl.marks);
   document.getElementById("easyShare")?.addEventListener("click", () => {
@@ -1421,6 +1539,109 @@ function renderEasyDone(m: Extract<FromWorker, { type: "done" }>) {
     void navigator.share({ files: [new File([tl.blob], tl.fileName, { type: tl.blob.type })], title }).catch(() => { /* abgebrochen */ });
   });
 }
+
+// ---------- Aussortiertes Foto ansehen und zurückholen ----------
+const rejDialog = $<HTMLDialogElement>("rejDialog");
+let rejShown = -1;
+function showRejected(i: number) {
+  const r = easyRej.get(i), v = easyViews.get(i);
+  if (!r || !v) return;
+  rejShown = i;
+  const img = $<HTMLImageElement>("rejImg"), ring = $("rejRing");
+  img.removeAttribute("src");
+  ring.hidden = !v.disc;
+  if (v.disc) {
+    // Kreis um die gemessene Scheibe: Lage und Grösse als Anteil des Bildes
+    const d = v.disc;
+    ring.style.left = `${(d.x - d.r) * 100}%`;
+    ring.style.top = `${(d.y - d.r * v.aspect) * 100}%`;
+    ring.style.width = `${d.r * 200}%`;
+  }
+  void v.blob.then((blob) => {
+    if (!blob || rejShown !== i) return;
+    const u = URL.createObjectURL(blob);
+    easyViewUrls.push(u);
+    img.src = u;
+  });
+  syncRejected();
+  if (!rejDialog.open) rejDialog.showModal();
+}
+function syncRejected() {
+  const r = easyRej.get(rejShown);
+  if (!r) return;
+  const used = easyForce.has(rejShown);
+  $("rejText").textContent = `${r.name}: ${used ? L("easy.rej.back") : M(r.reason)}.${r.canUse ? "" : " " + L(EK("easy.rej.cannot"))}`;
+  $("rejUse").hidden = !r.canUse;
+  $("rejUse").textContent = L(used ? "easy.rej.unuse" : "easy.rej.use");
+}
+$("rejUse").addEventListener("click", () => {
+  if (easyForce.has(rejShown)) easyForce.delete(rejShown);
+  else easyForce.add(rejShown);
+  rejDialog.close();
+  renderEasy();
+});
+$("rejClose").addEventListener("click", () => rejDialog.close());
+rejDialog.addEventListener("click", (ev) => { if (ev.target === rejDialog) rejDialog.close(); });
+
+// ---------- Format des Films: drei Kacheln (der Wert steht im verborgenen Auswahlfeld) ----------
+const shapeSelect = $<HTMLSelectElement>("easyShape");
+function syncShapes() {
+  document.querySelectorAll<HTMLButtonElement>("#easyShapes [data-shape]").forEach((b) => {
+    const opt = [...shapeSelect.options].find((o) => o.value === b.dataset.shape);
+    // "Hochformat 9:16 – Status, Reels" → Name und Verwendung
+    const [name, ...use] = (opt?.textContent ?? "").split(" – ");
+    b.querySelector("b")!.textContent = name;
+    b.querySelector("small")!.textContent = use.join(" – ");
+    const on = shapeSelect.value === b.dataset.shape;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+  });
+}
+document.querySelectorAll<HTMLButtonElement>("#easyShapes [data-shape]").forEach((b) => b.addEventListener("click", () => {
+  shapeSelect.value = b.dataset.shape!;
+  syncShapes();
+}));
+
+// ---------- Vorschau vor dem Start: erstes, mittleres und letztes Foto ----------
+let previewSeq = 0;
+async function showEasyPreview(files: File[]) {
+  const box = $("easyPreview"), seq = ++previewSeq;
+  box.replaceChildren();
+  box.hidden = true;
+  // nur Formate, die der Browser selbst lesen kann (RAW und HEIC: ohne Vorschau)
+  const ok = files.filter((f) => /\.(jpe?g|png|webp|bmp)$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  if (ok.length < 3) return;
+  for (const f of [ok[0], ok[ok.length >> 1], ok[ok.length - 1]]) {
+    try {
+      const bmp = await createImageBitmap(f, { resizeWidth: 360, resizeQuality: "medium" });
+      if (seq !== previewSeq) { bmp.close(); return; }
+      const c = document.createElement("canvas");
+      c.width = bmp.width;
+      c.height = bmp.height;
+      c.getContext("2d")?.drawImage(bmp, 0, 0);
+      bmp.close();
+      box.appendChild(c);
+      box.hidden = false;
+    } catch { /* dieses Foto ohne Vorschau */ }
+  }
+}
+
+// ---------- Web-App: ohne Internet nutzbar, installierbar ----------
+if (!isDesktopApp() && import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => void navigator.serviceWorker.register("./sw.js").catch(() => { /* ohne Offline-Betrieb */ }));
+}
+let installPrompt: (Event & { prompt(): Promise<unknown> }) | null = null;
+window.addEventListener("beforeinstallprompt", (ev) => {
+  ev.preventDefault();
+  installPrompt = ev as typeof installPrompt;
+  $("installBtn").hidden = false;
+});
+window.addEventListener("appinstalled", () => { $("installBtn").hidden = true; });
+$("installBtn").addEventListener("click", () => {
+  void installPrompt?.prompt();
+  installPrompt = null;
+  $("installBtn").hidden = true;
+});
 
 document.body.classList.toggle("app", isDesktopApp());
 // Ordner wählen: nicht auf Geräten, die das nicht können (iPhone/iPad)

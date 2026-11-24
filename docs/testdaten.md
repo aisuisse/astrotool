@@ -272,3 +272,13 @@ Keine neuen Testdaten.
 - **Installer:** Englisch, Deutsch, Spanisch (zwei Einträge für die beiden Windows-Kennungen), Portugiesisch (Portugal und Brasilien), Italienisch, Bulgarisch – im erzeugten Installer-Skript enthalten; nicht in jeder Sprache durchgeklickt.
 - **Referenzserien in der fertigen App (Einfach-Modus):** eigene Serie 73 von 77, Samsung M51 9 von 40, Pixel 44 von 68, Spanien 52 von 55, Mondfinsternis 14 von 28 – alle wie in 0.36.
 - **Arabisch:** nicht eingebaut. Abstände und Ausrichtung folgen aber schon der Schreibrichtung, Film und Zeitleiste bleiben von links nach rechts.
+
+## Offline, zurückholen, Format-Kacheln, Restzeit (nach 0.37, 24.11.2026)
+
+Keine neuen Testdaten.
+
+- **Ohne Internet:** gebaute Webseite (`vite preview`) geöffnet, Server gestoppt, Seite neu geladen: sie erscheint, liest sechs Fotos und erstellt den Film. Erste Fassung scheiterte genau hier: Der Vorrat des Service Workers fand Skript und Stil nicht wieder, weil der Server mit „Vary“ antwortet – behoben mit `ignoreVary`. Mit laufendem Server fiel das nicht auf (dann holt er die Datei aus dem Netz).
+- **Zurückholen:** eigene Serie, eines der vier überstrahlten Fotos zurückgeholt → 74 statt 73 von 77 im Film; das Foto ist danach grün markiert und lässt sich wieder weglassen. Fotos ohne gemessene Scheibe (Mondfinsternis-Serie: 14 Landschaften) lassen sich nur ansehen – ohne Scheibe gibt es nichts, was in die Mitte gerückt werden könnte.
+- **Restzeit:** eigene Serie (rund 50 s): Anzeige ab etwa 3 s, Fortschritt im Reiter (z. B. „48 % – Astrotool“). Die späteren Abschnitte werden aus der Suchzeit geschätzt (zuschneiden 0.6 ×, Film 1.2 ×) – darum „etwa“.
+- **Einheitstests:** 265 (neu: zurückgeholte Fotos).
+- **Nicht geprüft:** Installieren auf einem echten Handy, Ton und Vibrieren am Ende, der Volltest der Windows-App mit diesem Stand.
