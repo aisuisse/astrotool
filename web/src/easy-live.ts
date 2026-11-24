@@ -455,6 +455,8 @@ export function buildTimeline(root: HTMLElement, video: HTMLVideoElement, thumbs
     b.append(c, label);
     b.addEventListener("click", () => {
       video.currentTime = marks[it.k] + 0.02;
+      // Markierung sofort setzen – das Video meldet den Sprung erst, wenn es das Bild dekodiert hat
+      follow();
     });
     root.appendChild(b);
     buttons.push(b);

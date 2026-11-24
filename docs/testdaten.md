@@ -273,7 +273,7 @@ Keine neuen Testdaten.
 - **Referenzserien in der fertigen App (Einfach-Modus):** eigene Serie 73 von 77, Samsung M51 9 von 40, Pixel 44 von 68, Spanien 52 von 55, Mondfinsternis 14 von 28 – alle wie in 0.36.
 - **Arabisch:** nicht eingebaut. Abstände und Ausrichtung folgen aber schon der Schreibrichtung, Film und Zeitleiste bleiben von links nach rechts.
 
-## Offline, zurückholen, Format-Kacheln, Restzeit (nach 0.37, 24.11.2026)
+## Offline, zurückholen, Format-Kacheln, Restzeit (0.38, 24.11.2026)
 
 Keine neuen Testdaten.
 
@@ -281,4 +281,6 @@ Keine neuen Testdaten.
 - **Zurückholen:** eigene Serie, eines der vier überstrahlten Fotos zurückgeholt → 74 statt 73 von 77 im Film; das Foto ist danach grün markiert und lässt sich wieder weglassen. Fotos ohne gemessene Scheibe (Mondfinsternis-Serie: 14 Landschaften) lassen sich nur ansehen – ohne Scheibe gibt es nichts, was in die Mitte gerückt werden könnte.
 - **Restzeit:** eigene Serie (rund 50 s): Anzeige ab etwa 3 s, Fortschritt im Reiter (z. B. „48 % – Astrotool“). Die späteren Abschnitte werden aus der Suchzeit geschätzt (zuschneiden 0.6 ×, Film 1.2 ×) – darum „etwa“.
 - **Einheitstests:** 265 (neu: zurückgeholte Fotos).
-- **Nicht geprüft:** Installieren auf einem echten Handy, Ton und Vibrieren am Ende, der Volltest der Windows-App mit diesem Stand.
+- **Volltest der App:** 56 von 56. Im ersten Durchgang 53 von 56: Nach einem Tipp in die Zeitleiste sprang die Markierung erst um, wenn das Video den Sprung verarbeitet hatte – in der App später als die 0.6 s, die der Test wartet; die beiden anderen Fehler waren Folgefehler (die App blieb im Mondfinsternis-Modus). Die Markierung springt jetzt sofort beim Tippen.
+- **Referenzserien in der fertigen App:** eigene Serie 73 von 77, Samsung 9 von 40, Pixel 44 von 68, Spanien 52 von 55, Mondfinsternis 14 von 28 – wie in 0.37.
+- **Nicht geprüft:** Installieren auf einem echten Handy, Ton und Vibrieren am Ende.
